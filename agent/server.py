@@ -43,6 +43,7 @@ from .dashboard.team_settings import get_team_default_model_pair, get_team_defau
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
+    RepoMemoryToolMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -50,11 +51,14 @@ from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    inject_repo_memory_before_model,
     notify_step_limit_reached,
 )
+from .repo_memory.runtime import RepoMemoryRuntime
 from .prompt import construct_system_prompt
 from .tools import (
     fetch_url,
+    get_entity_history,
     http_request,
     linear_comment,
     linear_create_issue,
@@ -64,7 +68,9 @@ from .tools import (
     linear_list_teams,
     linear_update_issue,
     open_pull_request,
+    remember_repo_decision,
     request_pr_review,
+    search_similar_code,
     slack_read_thread_messages,
     slack_thread_reply,
     web_search,
@@ -419,6 +425,7 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
+    config.setdefault("metadata", {})
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -448,6 +455,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    repo_config = config["metadata"].get("repo", {})
+    repo_full_name = "unknown"
+    if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
+        repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
+    repo_memory_runtime = RepoMemoryRuntime(repo=repo_full_name)
+    config["metadata"]["repo_full_name"] = repo_full_name
+    config["metadata"]["repo_memory_runtime"] = repo_memory_runtime
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -578,6 +592,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            remember_repo_decision,
+            search_similar_code,
+            get_entity_history,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,
@@ -596,8 +613,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            RepoMemoryToolMiddleware(),
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            inject_repo_memory_before_model,
             ensure_no_empty_msg,
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),

@@ -8,10 +8,12 @@ from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .tool_error_handler import ToolErrorMiddleware
+from ..repo_memory.middleware import RepoMemoryToolMiddleware, inject_repo_memory_before_model
 
 __all__ = [
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
+    "RepoMemoryToolMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "ToolErrorMiddleware",
@@ -19,5 +21,6 @@ __all__ = [
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
+    "inject_repo_memory_before_model",
     "notify_step_limit_reached",
 ]

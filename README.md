@@ -142,6 +142,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 - **[Installation Guide](INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
+- **[Repository Memory](agent/repo_memory/README.md)** — install, usage, configuration, and testing notes for the repo-memory layer in this fork
 
 ## License
 
