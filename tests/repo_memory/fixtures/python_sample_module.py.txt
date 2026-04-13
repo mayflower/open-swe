@@ -1,0 +1,13 @@
+"""Utilities for repository memory tests."""
+
+
+class Widget:
+    """Demo widget."""
+
+    def render(self, name):
+        return f"widget:{name}"
+
+
+def helper(value):
+    """Normalize a value."""
+    return value.strip().lower()

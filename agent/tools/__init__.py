@@ -1,5 +1,6 @@
 from .commit_and_open_pr import commit_and_open_pr
 from .fetch_url import fetch_url
+from .get_entity_history import get_entity_history
 from .get_branch_name import get_branch_name
 from .get_pr_review_comments import get_pr_review_comments
 from .github_comment import github_comment
@@ -21,6 +22,8 @@ from .linear_get_issue_comments import linear_get_issue_comments
 from .linear_list_teams import linear_list_teams
 from .linear_update_issue import linear_update_issue
 from .list_repos import list_repos
+from .remember_repo_decision import remember_repo_decision
+from .search_similar_code import search_similar_code
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
 from .web_search import web_search
@@ -31,6 +34,7 @@ __all__ = [
     "dismiss_pr_review",
     "fetch_url",
     "get_branch_name",
+    "get_entity_history",
     "get_pr_review",
     "get_pr_review_comments",
     "github_comment",
@@ -45,6 +49,8 @@ __all__ = [
     "linear_list_teams",
     "linear_update_issue",
     "list_repos",
+    "remember_repo_decision",
+    "search_similar_code",
     "slack_read_thread_messages",
     "slack_thread_reply",
     "submit_pr_review",

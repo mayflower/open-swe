@@ -27,11 +27,14 @@ from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    RepoMemoryToolMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    inject_repo_memory_before_model,
     open_pr_if_needed,
 )
+from .repo_memory.runtime import RepoMemoryRuntime
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
@@ -39,6 +42,7 @@ from .tools import (
     dismiss_pr_review,
     fetch_url,
     get_branch_name,
+    get_entity_history,
     get_pr_review,
     get_pr_review_comments,
     github_comment,
@@ -53,6 +57,8 @@ from .tools import (
     list_pr_review_comments,
     list_pr_reviews,
     list_repos,
+    remember_repo_decision,
+    search_similar_code,
     slack_read_thread_messages,
     slack_thread_reply,
     submit_pr_review,
@@ -194,6 +200,7 @@ DEFAULT_RECURSION_LIMIT = 9_999
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
+    config.setdefault("metadata", {})
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -268,12 +275,22 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
         await asyncio.to_thread(
             sandbox_backend.execute,
-            "git config --global user.name 'open-swe[bot]' && git config --global user.email 'open-swe@users.noreply.github.com'",
+            (
+                "git config --global user.name 'open-swe[bot]' && "
+                "git config --global user.email 'open-swe@users.noreply.github.com'"
+            ),
         )
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    repo_config = config["metadata"].get("repo", {})
+    repo_full_name = "unknown"
+    if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
+        repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
+    repo_memory_runtime = RepoMemoryRuntime(repo=repo_full_name)
+    config["metadata"]["repo_full_name"] = repo_full_name
+    config["metadata"]["repo_memory_runtime"] = repo_memory_runtime
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -296,6 +313,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             web_search,
             list_repos,
             get_branch_name,
+            remember_repo_decision,
+            search_similar_code,
+            get_entity_history,
             commit_and_open_pr,
             linear_comment,
             linear_create_issue,
@@ -319,7 +339,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),
+            RepoMemoryToolMiddleware(),
             check_message_queue_before_model,
+            inject_repo_memory_before_model,
             ensure_no_empty_msg,
             open_pr_if_needed,
         ],

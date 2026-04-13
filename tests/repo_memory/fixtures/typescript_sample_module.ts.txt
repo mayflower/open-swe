@@ -1,0 +1,9 @@
+export class WidgetService {
+  render(name: string) {
+    return `widget:${name}`;
+  }
+}
+
+export function helper(value: string) {
+  return value.trim().toLowerCase();
+}
