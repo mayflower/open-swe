@@ -17,7 +17,11 @@ def test_execute_marks_dirty_unknown_for_configured_exit_codes() -> None:
     state = create_repo_memory_state()
     runtime = RepoMemoryRuntime(
         repo="repo",
-        config=RepoMemoryConfig(dirty_execute_exit_codes={1, 2}),
+        config=RepoMemoryConfig(
+            dirty_execute_exit_codes={1, 2},
+            embedding_provider="hashed",
+            embedding_dimensions=16,
+        ),
     )
 
     with patch(
@@ -38,7 +42,11 @@ def test_execute_ignores_exit_codes_outside_config() -> None:
     state = create_repo_memory_state()
     runtime = RepoMemoryRuntime(
         repo="repo",
-        config=RepoMemoryConfig(dirty_execute_exit_codes={1}),
+        config=RepoMemoryConfig(
+            dirty_execute_exit_codes={1},
+            embedding_provider="hashed",
+            embedding_dimensions=16,
+        ),
     )
 
     with patch(

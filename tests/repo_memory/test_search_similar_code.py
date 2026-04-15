@@ -8,7 +8,10 @@ from agent.tools.search_similar_code import search_similar_code
 
 
 def test_search_similar_code_excludes_current_file_and_prefers_same_language() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.store.upsert_entity_revision(
         EntityRevision(
             entity_id="a",

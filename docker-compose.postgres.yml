@@ -34,7 +34,10 @@ services:
     environment:
       REPO_MEMORY_BACKEND: postgres
       REPO_MEMORY_DATABASE_URL: postgresql://open_swe:open_swe@postgres:5432/open_swe
+      REPO_MEMORY_EMBEDDING_PROVIDER: openai
+      REPO_MEMORY_EMBEDDING_MODEL: text-embedding-3-small
       PYTHONPATH: /workspace
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     command:
       - /bin/bash
       - -lc

@@ -29,6 +29,7 @@ dependencies = [
     "exa-py>=2.13.0",
     "langchain-google-genai>=4.2.4",
     "asyncpg>=0.30.0",
+    "openai>=2.29.0",
 ]
 
 [project.scripts]

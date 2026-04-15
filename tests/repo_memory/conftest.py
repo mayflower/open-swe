@@ -9,7 +9,7 @@ import pytest
 from agent.repo_memory.config import RepoMemoryConfig
 from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
 from agent.repo_memory.persistence.repositories import create_repo_memory_store
-from agent.repo_memory.runtime import _RUNTIME_REGISTRY, stop_repo_memory_dreaming_daemon
+from agent.repo_memory.runtime import _RUNTIME_REGISTRY
 
 DEFAULT_POSTGRES_URL = "postgresql://open_swe:open_swe@localhost:5432/open_swe"
 
@@ -31,8 +31,6 @@ def _can_connect(database_url: str) -> bool:
 
 @pytest.fixture(autouse=True)
 def clear_runtime_registry() -> None:
-    for runtime in _RUNTIME_REGISTRY.values():
-        stop_repo_memory_dreaming_daemon(runtime)
     _RUNTIME_REGISTRY.clear()
 
 

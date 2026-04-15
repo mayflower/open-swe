@@ -55,7 +55,7 @@ def test_core_block_shape_and_repo_state_defaults() -> None:
         token_budget=100,
     )
     state = create_repo_memory_state()
-    config = RepoMemoryConfig()
+    config = RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16)
 
     assert block.read_only is True
     assert state["dirty_paths"] == set()

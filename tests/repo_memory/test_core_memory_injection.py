@@ -8,7 +8,10 @@ from agent.repo_memory.runtime import RepoMemoryRuntime
 
 
 def test_injection_builds_separate_repo_memory_message() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.store.append_repo_event(
         RepoEvent(
             repo="repo",
@@ -32,7 +35,10 @@ def test_injection_builds_separate_repo_memory_message() -> None:
 
 
 def test_injection_can_resolve_runtime_from_config_metadata() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.store.append_repo_event(
         RepoEvent(
             repo="repo",
@@ -58,7 +64,10 @@ def test_injection_can_resolve_runtime_from_config_metadata() -> None:
 
 
 def test_injection_flushes_dirty_paths_before_compiling() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.sandbox_backend = _FakeBackend(
         files={"agent/feature.py": "def helper(value):\n    return value.strip()\n"}
     )
@@ -81,7 +90,10 @@ def test_injection_flushes_dirty_paths_before_compiling() -> None:
 
 
 def test_injection_flushes_execute_dirty_unknown_via_git_diff() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.sandbox_backend = _FakeBackend(
         files={"agent/feature.py": "def helper(value):\n    return value.strip()\n"},
         status_output="M\tagent/feature.py\n",
@@ -105,7 +117,11 @@ def test_injection_flushes_execute_dirty_unknown_via_git_diff() -> None:
 def test_injection_prioritizes_focus_paths_and_bounds_execute_probe_scope() -> None:
     runtime = RepoMemoryRuntime(
         repo="repo",
-        config=RepoMemoryConfig(parse_dirty_path_limit=2),
+        config=RepoMemoryConfig(
+            parse_dirty_path_limit=2,
+            embedding_provider="hashed",
+            embedding_dimensions=16,
+        ),
     )
     runtime.sandbox_backend = _FakeBackend(
         files={

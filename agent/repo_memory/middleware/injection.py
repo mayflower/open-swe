@@ -26,11 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test env
 
 from ..compiler import compile_core_memory_blocks, render_repo_memory_message
 from ..config import RepoMemoryConfig
-from ..dreaming import (
-    build_snapshot_injection_blocks,
-    run_repo_memory_dreaming_pass,
-    supports_dreaming,
-)
+from ..dreaming import build_snapshot_injection_blocks, supports_dreaming
 from ..runtime import resolve_runtime_from_context, runtime_attr
 from ..state import RepoMemoryState
 from ..sync import flush_runtime_state
@@ -49,12 +45,6 @@ def build_injection_payload(state: dict[str, Any]) -> dict[str, Any] | None:
     flushed = flush_runtime_state(state, runtime)
     blocks = None
     if supports_dreaming(store):
-        snapshot = store.get_latest_repo_core_snapshot(repo)
-        if snapshot is None and store.list_repo_events(repo):
-            try:
-                run_repo_memory_dreaming_pass(runtime, worker_id=f"before-model:{repo}")
-            except Exception:
-                logger.exception("repo_memory_dreaming_bootstrap_failed repo=%s", repo)
         blocks = build_snapshot_injection_blocks(
             store,
             repo,

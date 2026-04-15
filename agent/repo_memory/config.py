@@ -14,18 +14,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _resolved_embedding_provider(provider: str | None) -> str:
+    return provider or os.getenv("REPO_MEMORY_EMBEDDING_PROVIDER", "openai")
+
+
 @dataclass(slots=True)
 class RepoMemoryConfig:
     """Configuration for repository memory behavior."""
 
     backend: str = field(default_factory=lambda: os.getenv("REPO_MEMORY_BACKEND", "auto"))
     database_url: str | None = field(default_factory=lambda: os.getenv("REPO_MEMORY_DATABASE_URL"))
-    embedding_provider: str = field(
-        default_factory=lambda: os.getenv("REPO_MEMORY_EMBEDDING_PROVIDER", "hashed")
-    )
-    embedding_dimensions: int = field(
-        default_factory=lambda: _env_int("REPO_MEMORY_EMBEDDING_DIMENSIONS", 16)
-    )
+    embedding_provider: str | None = None
+    embedding_dimensions: int | None = None
+    embedding_model: str | None = None
+    embedding_version: str | None = None
     repo_scope_only: bool = True
     max_core_memory_tokens: int = 600
     core_block_token_budgets: dict[str, int] = field(
@@ -50,6 +52,28 @@ class RepoMemoryConfig:
     dreaming_overlay_max_items: int = 4
     dreaming_daemon_poll_interval_seconds: int = 30
     dreaming_daemon_lease_ttl_seconds: int = 60
+
+    def __post_init__(self) -> None:
+        self.embedding_provider = _resolved_embedding_provider(self.embedding_provider)
+        self.embedding_model = self.embedding_model or os.getenv(
+            "REPO_MEMORY_EMBEDDING_MODEL",
+            "text-embedding-3-small",
+        )
+        provider = self.embedding_provider.lower()
+        if self.embedding_dimensions is None:
+            default_dimensions = 16 if provider in {"hashed", "hash", "local"} else 1536
+            self.embedding_dimensions = _env_int(
+                "REPO_MEMORY_EMBEDDING_DIMENSIONS",
+                default_dimensions,
+            )
+        if self.embedding_version is None:
+            configured_version = os.getenv("REPO_MEMORY_EMBEDDING_VERSION")
+            if configured_version:
+                self.embedding_version = configured_version
+            elif provider in {"hashed", "hash", "local"}:
+                self.embedding_version = "sha256-token-v1"
+            else:
+                self.embedding_version = f"{self.embedding_model}:{self.embedding_dimensions}"
 
     def resolved_backend(self) -> str:
         if self.backend != "auto":
