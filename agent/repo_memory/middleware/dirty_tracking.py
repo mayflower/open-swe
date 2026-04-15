@@ -1,14 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
-from langchain_core.messages import ToolMessage
-from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
+try:
+    from langchain.agents.middleware.types import AgentMiddleware, AgentState
+except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+    class AgentState(dict):
+        pass
+
+    class AgentMiddleware:
+        pass
+
+try:
+    from langchain_core.messages import ToolMessage
+except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+    ToolMessage = Any
+
+try:
+    from langgraph.prebuilt.tool_node import ToolCallRequest
+except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+    ToolCallRequest = Any
+
+try:
+    from langgraph.types import Command
+except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+    Command = Any
 
 from ..delta import mark_execute_dirty_unknown
 from ..focus import compute_focus_set
+from ..runtime import resolve_runtime_from_context, runtime_attr
 
 
 def update_state_for_tool(
@@ -19,6 +40,10 @@ def update_state_for_tool(
     tool_result: object | None = None,
 ) -> dict:
     tool_args = tool_args or {}
+    runtime = resolve_runtime_from_context(state)
+    if runtime is not None:
+        state["repo_memory_runtime"] = runtime
+    config = runtime_attr(runtime, "config", None)
     dirty_paths = set(state.get("dirty_paths", set()))
     focus_paths = list(state.get("focus_paths", []))
     focus_entities = list(state.get("focus_entities", []))
@@ -49,7 +74,11 @@ def update_state_for_tool(
         if isinstance(tool_result, dict):
             exit_code = tool_result.get("exit_code", exit_code)
         if isinstance(exit_code, int):
-            mark_execute_dirty_unknown(state, exit_code)
+            mark_execute_dirty_unknown(
+                state,
+                exit_code,
+                dirty_exit_codes=runtime_attr(config, "dirty_execute_exit_codes", None),
+            )
 
     state["dirty_paths"] = dirty_paths
     focus = compute_focus_set(explicit_paths=focus_paths, explicit_entities=focus_entities)
@@ -97,4 +126,3 @@ class RepoMemoryToolMiddleware(AgentMiddleware):
         if state is not None and name:
             update_state_for_tool(state, tool_name=name, tool_args=args, tool_result=result)
         return result
-

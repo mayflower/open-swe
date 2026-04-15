@@ -4,8 +4,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..config import RepoMemoryConfig
 from ..domain import CodeEntity, EntityRevision, FileRevision, RepoCoreBlock, RepoEvent, RepoFile
+from ..embeddings import build_embedding_provider
 from .models import MemoryMetadata, build_metadata
+from .postgres import PostgresRepoMemoryStore
 
 
 @dataclass(slots=True)
@@ -116,3 +119,14 @@ class InMemoryRepoMemoryStore:
 
     def list_lineage(self) -> list[dict[str, Any]]:
         return list(self._lineage)
+
+
+def create_repo_memory_store(config: RepoMemoryConfig) -> InMemoryRepoMemoryStore | PostgresRepoMemoryStore:
+    if config.resolved_backend() == "postgres":
+        if not config.database_url:
+            raise ValueError("REPO_MEMORY_DATABASE_URL is required for postgres repo memory")
+        return PostgresRepoMemoryStore(
+            database_url=config.database_url,
+            embedding_provider=build_embedding_provider(config),
+        )
+    return InMemoryRepoMemoryStore()

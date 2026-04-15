@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.config import get_config
-
 from ..repo_memory.config import RepoMemoryConfig
-from ..repo_memory.retrieval.search import search_similar_code_results
-from ..repo_memory.runtime import DEFAULT_RUNTIME
+from ..repo_memory.retrieval.search import search_store_similar_code_results
+from ..repo_memory.runtime import resolve_runtime_from_context, runtime_attr
 
 
 def search_similar_code(
@@ -18,14 +16,17 @@ def search_similar_code(
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Search repo memory for reusable code."""
-    config = get_config()
-    metadata = config.get("metadata", {})
-    runtime = metadata.get("repo_memory_runtime", DEFAULT_RUNTIME)
-    repo = getattr(runtime, "repo", None) or metadata.get("repo_full_name", "unknown")
-    results = search_similar_code_results(
-        runtime.store.iter_entities(repo),
+    runtime = resolve_runtime_from_context()
+    repo = runtime_attr(runtime, "repo", "unknown")
+    store = runtime_attr(runtime, "store")
+    if store is None:
+        return {"results": []}
+    config = runtime_attr(runtime, "config", RepoMemoryConfig()) or RepoMemoryConfig()
+    results = search_store_similar_code_results(
+        store,
+        repo,
         query,
-        config=getattr(runtime, "config", RepoMemoryConfig()),
+        config=config,
         current_path=current_path,
         current_entity_id=current_entity_id,
         language=language,
@@ -45,4 +46,3 @@ def search_similar_code(
             for result in results
         ]
     }
-

@@ -145,6 +145,30 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 - **[Repository Memory](agent/repo_memory/README.md)** — install, usage, configuration, and testing notes for the repo-memory layer in this fork
 
+## Local Postgres
+
+This fork includes a local Docker Compose setup for Postgres with `pgvector` enabled:
+
+```bash
+make postgres-up
+```
+
+Default connection string:
+
+```bash
+postgresql://open_swe:open_swe@localhost:5432/open_swe
+```
+
+Useful commands:
+
+```bash
+make postgres-ps
+make postgres-logs
+make postgres-down
+```
+
+The compose file is [docker-compose.postgres.yml](/Users/johann/src/ml/open-swe/docker-compose.postgres.yml), and the extension is enabled during init by [01-enable-pgvector.sql](/Users/johann/src/ml/open-swe/docker/postgres/initdb/01-enable-pgvector.sql).
+
 ## License
 
 MIT

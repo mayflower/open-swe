@@ -34,7 +34,7 @@ from .middleware import (
     inject_repo_memory_before_model,
     open_pr_if_needed,
 )
-from .repo_memory.runtime import RepoMemoryRuntime
+from .repo_memory.runtime import bind_runtime_context, get_or_create_repo_memory_runtime
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
@@ -288,11 +288,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     repo_full_name = "unknown"
     if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
         repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
-    repo_memory_runtime = RepoMemoryRuntime(repo=repo_full_name)
+    repo_memory_runtime = get_or_create_repo_memory_runtime(repo_full_name)
     config["metadata"]["repo_full_name"] = repo_full_name
     config["metadata"]["repo_memory_runtime"] = repo_memory_runtime
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    bind_runtime_context(
+        repo_memory_runtime,
+        sandbox_backend=sandbox_backend,
+        work_dir=work_dir,
+    )
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}

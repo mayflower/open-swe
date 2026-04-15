@@ -14,6 +14,9 @@ def parse_rust_entities(path: str, source: str) -> list[ParsedEntity]:
     entities: list[ParsedEntity] = []
     current_parent: str | None = None
     for idx, line in enumerate(source.splitlines(), start=1):
+        if current_parent and line.strip() == "}":
+            current_parent = None
+            continue
         type_match = TYPE_PATTERN.search(line)
         if type_match:
             kind_name, name = type_match.groups()
@@ -39,7 +42,7 @@ def parse_rust_entities(path: str, source: str) -> list[ParsedEntity]:
                     end_line=idx,
                 )
             )
-            current_parent = name if kind == EntityKind.TRAIT else None
+            current_parent = name if kind == EntityKind.TRAIT and "}" not in line else None
             continue
         fn_match = FN_PATTERN.search(line)
         if fn_match:
@@ -63,4 +66,3 @@ def parse_rust_entities(path: str, source: str) -> list[ParsedEntity]:
                 )
             )
     return entities
-
