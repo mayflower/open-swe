@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
 from agent.repo_memory.runtime import RepoMemoryRuntime
 
 
@@ -72,3 +73,44 @@ def test_get_agent_registers_repo_memory_wiring() -> None:
         getattr(item, "__name__", "") == "inject_repo_memory_before_model"
         for item in middleware
     )
+
+
+def test_get_agent_uses_postgres_repo_memory_store_when_database_url_is_configured() -> None:
+    server = pytest.importorskip("agent.server")
+    config = _execution_config()
+    mock_sandbox = MagicMock(id="sandbox-cached")
+    dummy_agent = _DummyAgent()
+
+    with (
+        patch.object(server, "resolve_github_token", new=AsyncMock(return_value=("ghp", "enc"))),
+        patch.object(
+            server,
+            "get_sandbox_id_from_metadata",
+            new=AsyncMock(return_value="sandbox-cached"),
+        ),
+        patch.object(
+            server,
+            "get_github_app_installation_token",
+            new=AsyncMock(return_value="ghs_fresh"),
+        ),
+        patch.object(server, "_configure_github_proxy"),
+        patch.object(server, "aresolve_sandbox_work_dir", new=AsyncMock(return_value="/workspace")),
+        patch.object(server, "check_or_recreate_sandbox", new=AsyncMock(return_value=mock_sandbox)),
+        patch.object(server, "make_model", return_value=MagicMock()),
+        patch.object(server, "construct_system_prompt", return_value="prompt"),
+        patch.object(server, "create_deep_agent", return_value=dummy_agent),
+        patch.dict(server.SANDBOX_BACKENDS, {"thread-123": mock_sandbox}, clear=True),
+        patch.dict(
+            "os.environ",
+            {
+                "SANDBOX_TYPE": "langsmith",
+                "REPO_MEMORY_DATABASE_URL": "postgresql://open_swe:open_swe@localhost:5432/open_swe",
+            },
+            clear=False,
+        ),
+    ):
+        asyncio.run(server.get_agent(config))
+
+    runtime = config["metadata"]["repo_memory_runtime"]
+    assert isinstance(runtime, RepoMemoryRuntime)
+    assert isinstance(runtime.store, PostgresRepoMemoryStore)

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.config import get_config
-
 from ..repo_memory.events import search_repo_events
-from ..repo_memory.provenance.git_history import maybe_load_deep_history
+from ..repo_memory.provenance.git_history import load_entity_git_history, maybe_load_deep_history
 from ..repo_memory.provenance.summary import summarize_entity_history
-from ..repo_memory.runtime import DEFAULT_RUNTIME
+from ..repo_memory.runtime import resolve_runtime_from_context, runtime_attr
 
 
 def get_entity_history(
@@ -15,20 +13,21 @@ def get_entity_history(
     include_deep_history: bool = False,
 ) -> dict[str, Any]:
     """Return entity history from repo memory and provenance."""
-    config = get_config()
-    metadata = config.get("metadata", {})
-    runtime = metadata.get("repo_memory_runtime", DEFAULT_RUNTIME)
-    repo = getattr(runtime, "repo", None) or metadata.get("repo_full_name", "unknown")
-    entity = runtime.store.get_entity(entity_id)
+    runtime = resolve_runtime_from_context()
+    repo = runtime_attr(runtime, "repo", "unknown")
+    store = runtime_attr(runtime, "store")
+    if store is None:
+        return {"status": "unavailable", "entity_id": entity_id}
+    entity = store.get_entity(entity_id)
     if entity is None:
         return {"status": "not_found", "entity_id": entity_id}
     events = search_repo_events(
-        runtime.store.list_repo_events(repo),
+        store.list_repo_events(repo),
         entity.current_revision.qualified_name,
     )
     deep_history = maybe_load_deep_history(
         include_deep_history,
-        lambda: [{"commit": "abc123", "summary": "historical context"}],
+        lambda: load_entity_git_history(runtime, entity.current_revision.path),
     )
     payload = summarize_entity_history(
         qualified_name=entity.current_revision.qualified_name,

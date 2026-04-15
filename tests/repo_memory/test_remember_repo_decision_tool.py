@@ -7,7 +7,7 @@ from agent.tools.remember_repo_decision import remember_repo_decision
 def test_remember_repo_decision_writes_scoped_event() -> None:
     runtime = RepoMemoryRuntime(repo="repo")
     with patch(
-        "agent.tools.remember_repo_decision.get_config",
+        "agent.repo_memory.runtime.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
         result = remember_repo_decision(

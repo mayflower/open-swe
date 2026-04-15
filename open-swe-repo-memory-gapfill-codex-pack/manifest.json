@@ -1,0 +1,167 @@
+{
+  "name": "open-swe-repo-memory-gapfill-codex-pack",
+  "version": "2.0.0",
+  "created_at": "2026-04-15T09:30:00Z",
+  "purpose": "Test-driven incremental Codex prompt pack to implement durable Postgres/pgvector-backed repo-memory RAG for the mayflower/open-swe feature/repo-memory branch.",
+  "target_repo": "mayflower/open-swe",
+  "target_branch": "feature/repo-memory",
+  "core_gaps": [
+    "postgres runtime/store wiring",
+    "durable schema and repository adapters",
+    "embedding and pgvector retrieval",
+    "durable refresh/index sync",
+    "persisted RAG e2e proof"
+  ],
+  "files": {
+    "context": [
+      "CONTEXT/VERIFIED_GAPS.md",
+      "CONTEXT/IMPLEMENTATION_TARGET.md",
+      "CONTEXT/FILES_OF_INTEREST.md",
+      "CONTEXT/TESTING_STRATEGY.md"
+    ],
+    "top_level": [
+      "README.md",
+      "AGENTS.md.template",
+      "RUNBOOK.md",
+      "PROMPT_INDEX.md",
+      "TRACKER.md",
+      "manifest.json"
+    ]
+  },
+  "prompts": [
+    {
+      "id": 0,
+      "file": "PROMPTS/00_start_here_bootstrap_and_baseline.md",
+      "stage": "bootstrap",
+      "depends_on": []
+    },
+    {
+      "id": 1,
+      "file": "PROMPTS/01_red_runtime_handoff_into_state.md",
+      "stage": "red",
+      "depends_on": [
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "file": "PROMPTS/02_green_runtime_handoff_into_state.md",
+      "stage": "green",
+      "depends_on": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "file": "PROMPTS/03_refactor_runtime_handoff_into_state.md",
+      "stage": "refactor",
+      "depends_on": [
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "file": "PROMPTS/04_red_before_model_flush_and_sync.md",
+      "stage": "red",
+      "depends_on": [
+        3
+      ]
+    },
+    {
+      "id": 5,
+      "file": "PROMPTS/05_green_before_model_flush_and_sync.md",
+      "stage": "green",
+      "depends_on": [
+        4
+      ]
+    },
+    {
+      "id": 6,
+      "file": "PROMPTS/06_refactor_before_model_flush_and_sync.md",
+      "stage": "refactor",
+      "depends_on": [
+        5
+      ]
+    },
+    {
+      "id": 7,
+      "file": "PROMPTS/07_red_execute_delta_probe_and_config.md",
+      "stage": "red",
+      "depends_on": [
+        6
+      ]
+    },
+    {
+      "id": 8,
+      "file": "PROMPTS/08_green_execute_delta_probe_and_config.md",
+      "stage": "green",
+      "depends_on": [
+        7
+      ]
+    },
+    {
+      "id": 9,
+      "file": "PROMPTS/09_refactor_execute_delta_probe_and_config.md",
+      "stage": "refactor",
+      "depends_on": [
+        8
+      ]
+    },
+    {
+      "id": 10,
+      "file": "PROMPTS/10_red_multilanguage_sync_routing.md",
+      "stage": "red",
+      "depends_on": [
+        9
+      ]
+    },
+    {
+      "id": 11,
+      "file": "PROMPTS/11_green_multilanguage_sync_routing.md",
+      "stage": "green",
+      "depends_on": [
+        10
+      ]
+    },
+    {
+      "id": 12,
+      "file": "PROMPTS/12_refactor_multilanguage_sync_routing.md",
+      "stage": "refactor",
+      "depends_on": [
+        11
+      ]
+    },
+    {
+      "id": 13,
+      "file": "PROMPTS/13_red_end_to_end_auto_refresh_flow.md",
+      "stage": "red",
+      "depends_on": [
+        12
+      ]
+    },
+    {
+      "id": 14,
+      "file": "PROMPTS/14_green_end_to_end_auto_refresh_flow.md",
+      "stage": "green",
+      "depends_on": [
+        13
+      ]
+    },
+    {
+      "id": 15,
+      "file": "PROMPTS/15_refactor_end_to_end_and_readme_truthfulness.md",
+      "stage": "refactor",
+      "depends_on": [
+        14
+      ]
+    },
+    {
+      "id": 16,
+      "file": "PROMPTS/16_final_validation_and_release_notes.md",
+      "stage": "final",
+      "depends_on": [
+        15
+      ]
+    }
+  ]
+}

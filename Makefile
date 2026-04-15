@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -15,6 +15,18 @@ run:
 
 install:
 	uv pip install -e .
+
+postgres-up:
+	docker compose -f docker-compose.postgres.yml up -d
+
+postgres-down:
+	docker compose -f docker-compose.postgres.yml down
+
+postgres-logs:
+	docker compose -f docker-compose.postgres.yml logs -f postgres
+
+postgres-ps:
+	docker compose -f docker-compose.postgres.yml ps
 
 ######################
 # TESTING
@@ -62,6 +74,10 @@ help:
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
 	@echo 'install                      - install dependencies'
+	@echo 'postgres-up                  - start local Postgres + pgvector'
+	@echo 'postgres-down                - stop local Postgres + pgvector'
+	@echo 'postgres-logs                - follow local Postgres logs'
+	@echo 'postgres-ps                  - show local Postgres status'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

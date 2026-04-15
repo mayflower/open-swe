@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 @dataclass(slots=True)
 class RepoMemoryConfig:
     """Configuration for repository memory behavior."""
 
+    backend: str = field(default_factory=lambda: os.getenv("REPO_MEMORY_BACKEND", "auto"))
+    database_url: str | None = field(default_factory=lambda: os.getenv("REPO_MEMORY_DATABASE_URL"))
+    embedding_provider: str = field(
+        default_factory=lambda: os.getenv("REPO_MEMORY_EMBEDDING_PROVIDER", "hashed")
+    )
+    embedding_dimensions: int = field(
+        default_factory=lambda: _env_int("REPO_MEMORY_EMBEDDING_DIMENSIONS", 16)
+    )
     repo_scope_only: bool = True
     max_core_memory_tokens: int = 600
     core_block_token_budgets: dict[str, int] = field(
@@ -26,3 +45,9 @@ class RepoMemoryConfig:
     same_kind_bonus: float = 1.0
     freshness_bonus: float = 0.5
 
+    def resolved_backend(self) -> str:
+        if self.backend != "auto":
+            return self.backend
+        if self.database_url:
+            return "postgres"
+        return "memory"

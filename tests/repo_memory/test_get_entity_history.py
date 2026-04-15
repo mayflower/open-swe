@@ -30,13 +30,40 @@ def test_get_entity_history_returns_recent_events_and_identity() -> None:
             entity_id="entity:helper",
         )
     )
+    runtime.sandbox_backend = _FakeBackend(
+        {
+            "agent/a.py": [
+                "abc123\talice\tintroduced helper",
+                "def456\tbob\trefined helper",
+            ]
+        }
+    )
+    runtime.work_dir = "/workspace"
     with patch(
-        "agent.tools.get_entity_history.get_config",
+        "agent.repo_memory.runtime.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
-        result = get_entity_history("entity:helper")
+        result = get_entity_history("entity:helper", include_deep_history=True)
 
     assert result["status"] == "ok"
     assert result["qualified_name"] == "helper"
     assert result["recent_events"] == ["helper should stay reusable"]
     assert result["provenance"]["last_observed_seq"] == 7
+    assert result["deep_history"][0]["commit"] == "abc123"
+
+
+class _FakeResult:
+    def __init__(self, output: str, exit_code: int = 0) -> None:
+        self.output = output
+        self.exit_code = exit_code
+
+
+class _FakeBackend:
+    def __init__(self, history_by_path: dict[str, list[str]]) -> None:
+        self.history_by_path = history_by_path
+
+    def execute(self, command: str) -> _FakeResult:
+        for path, lines in self.history_by_path.items():
+            if path in command:
+                return _FakeResult("\n".join(lines))
+        return _FakeResult("", exit_code=1)

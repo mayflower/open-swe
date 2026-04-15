@@ -54,7 +54,7 @@ from .middleware import (
     inject_repo_memory_before_model,
     notify_step_limit_reached,
 )
-from .repo_memory.runtime import RepoMemoryRuntime
+from .repo_memory.runtime import bind_runtime_context, get_or_create_repo_memory_runtime
 from .prompt import construct_system_prompt
 from .tools import (
     fetch_url,
@@ -459,11 +459,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     repo_full_name = "unknown"
     if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
         repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
-    repo_memory_runtime = RepoMemoryRuntime(repo=repo_full_name)
+    repo_memory_runtime = get_or_create_repo_memory_runtime(repo_full_name)
     config["metadata"]["repo_full_name"] = repo_full_name
     config["metadata"]["repo_memory_runtime"] = repo_memory_runtime
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    bind_runtime_context(
+        repo_memory_runtime,
+        sandbox_backend=sandbox_backend,
+        work_dir=work_dir,
+    )
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
