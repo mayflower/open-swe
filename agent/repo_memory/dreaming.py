@@ -87,7 +87,8 @@ def build_candidate_claims_from_events(
             scope_ref=scope_ref,
             normalized_text=normalized_text,
         )
-        embedding = provider.embed(event.summary)
+        text = event.summary.strip()
+        embedding = provider.embed(text)
         claim = MemoryClaim(
             claim_id=claim_key,
             claim_key=claim_key,
@@ -96,16 +97,16 @@ def build_candidate_claims_from_events(
             scope_kind=scope_kind,
             scope_ref=scope_ref,
             claim_kind=claim_kind,
-            text=event.summary.strip(),
+            text=text,
             normalized_text=normalized_text,
             status=ClaimStatus.CANDIDATE,
             first_seen_at=now,
             last_seen_at=now,
             revalidation_mode=revalidation_mode_for_claim_kind(claim_kind),
             embedding=embedding,
-            embedding_provider=config.embedding_provider,
-            embedding_dimensions=config.embedding_dimensions,
-            embedding_version="v1",
+            embedding_provider=provider.provider_name,
+            embedding_dimensions=provider.dimensions,
+            embedding_version=provider.version,
             metadata={
                 "source_event_id": event.event_id,
                 "observed_seq": event.observed_seq,
@@ -570,10 +571,10 @@ def _revalidate_claim(
     if claim.revalidation_mode == RevalidationMode.MANUAL_REVIEW:
         return (0.5, False, "manual-review")
     if claim.scope_kind == ClaimScopeKind.PATH:
-        exists = getattr(store, "get_file")(claim.repo, claim.scope_ref) is not None
+        exists = store.get_file(claim.repo, claim.scope_ref) is not None
         return (1.0 if exists else 0.0, exists, "path-exists" if exists else "path-missing")
     if claim.scope_kind == ClaimScopeKind.ENTITY:
-        exists = getattr(store, "get_entity")(claim.scope_ref) is not None
+        exists = store.get_entity(claim.scope_ref) is not None
         return (1.0 if exists else 0.0, exists, "entity-exists" if exists else "entity-missing")
     exists = store.get_sync_state(claim.repo).get("last_observed_seq", 0) > 0
     return (1.0 if exists else 0.0, exists, "repo-seen" if exists else "repo-empty")

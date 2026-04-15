@@ -4,11 +4,13 @@ import argparse
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .config import RepoMemoryConfig
 from .dreaming import run_repo_memory_dreaming_pass, supports_dreaming
+from .embeddings import build_embedding_provider
 from .persistence.repositories import create_repo_memory_store
 from .runtime import RepoMemoryRuntime
 
@@ -23,6 +25,49 @@ def discover_dreaming_repos(store: object) -> list[str]:
         return []
     repos = store.list_repositories()
     return sorted({repo for repo in repos if isinstance(repo, str) and repo})
+
+
+def reembed_repo_memory_repo(
+    store: object,
+    repo: str,
+    *,
+    config: RepoMemoryConfig,
+) -> dict[str, int]:
+    provider = build_embedding_provider(config)
+    entity_count = 0
+    claim_count = 0
+
+    if hasattr(store, "iter_entities") and hasattr(store, "upsert_entity_revision"):
+        for revision in store.iter_entities(repo):
+            store.upsert_entity_revision(revision)
+            entity_count += 1
+
+    if hasattr(store, "list_claims") and hasattr(store, "upsert_claim"):
+        claims = list(store.list_claims(repo))
+        embeddings = provider.embed_many([claim.text for claim in claims])
+        for claim, embedding in zip(claims, embeddings, strict=False):
+            updated = replace(
+                claim,
+                embedding=embedding,
+                embedding_provider=provider.provider_name,
+                embedding_dimensions=provider.dimensions,
+                embedding_version=provider.version,
+            )
+            store.upsert_claim(updated)
+            claim_count += 1
+
+    return {"entities": entity_count, "claims": claim_count}
+
+
+def reembed_repo_memory_all_repos(
+    store: object,
+    *,
+    config: RepoMemoryConfig,
+) -> dict[str, dict[str, int]]:
+    results: dict[str, dict[str, int]] = {}
+    for repo in discover_dreaming_repos(store):
+        results[repo] = reembed_repo_memory_repo(store, repo, config=config)
+    return results
 
 
 def run_repo_memory_dreaming_cycle(
@@ -93,6 +138,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run a single daemon cycle and exit.",
     )
+    parser.add_argument(
+        "--reembed-all",
+        action="store_true",
+        help="Recompute all stored claim/entity embeddings for every discovered repo and exit.",
+    )
+    parser.add_argument(
+        "--reembed-repo",
+        default=None,
+        help="Recompute stored claim/entity embeddings for one repo and exit.",
+    )
     return parser.parse_args()
 
 
@@ -112,6 +167,26 @@ def main() -> int:
     if config.resolved_backend() != "postgres":
         logger.error("The standalone Dreaming daemon requires the Postgres repo-memory backend.")
         return 2
+    store = create_repo_memory_store(config)
+    if args.reembed_repo:
+        summary = reembed_repo_memory_repo(store, args.reembed_repo, config=config)
+        logger.info(
+            "repo_memory_reembed_complete repo=%s entities=%d claims=%d",
+            args.reembed_repo,
+            summary["entities"],
+            summary["claims"],
+        )
+        return 0
+    if args.reembed_all:
+        summaries = reembed_repo_memory_all_repos(store, config=config)
+        for repo, summary in summaries.items():
+            logger.info(
+                "repo_memory_reembed_complete repo=%s entities=%d claims=%d",
+                repo,
+                summary["entities"],
+                summary["claims"],
+            )
+        return 0
     run_repo_memory_dreaming_daemon(
         config=config,
         iterations=1 if args.once else None,

@@ -11,6 +11,7 @@ The current branch also includes a Dreaming layer on top of repo memory. Dreamin
 - Supports `InMemoryRepoMemoryStore` for local/default execution
 - Supports `PostgresRepoMemoryStore` as the durable backend when `REPO_MEMORY_DATABASE_URL` is set
 - Supports a standalone Dreaming daemon process that discovers all repos from Postgres
+- Uses OpenAI embeddings as the canonical vector provider for durable retrieval and Dreaming claim similarity
 - Supported parsers: Python, TypeScript, Go, Rust
 - Current tools:
   - `remember_repo_decision`
@@ -39,6 +40,12 @@ If you also want the standalone Dreaming daemon in Docker:
 make dreaming-up
 ```
 
+If you switch the embedding contract and need to backfill stored vectors:
+
+```bash
+make dreaming-reembed
+```
+
 Default connection string:
 
 ```bash
@@ -48,6 +55,7 @@ postgresql://open_swe:open_swe@localhost:5432/open_swe
 The `vector` extension is created automatically on first startup.
 
 Repo memory switches to the Postgres-backed store automatically when `REPO_MEMORY_DATABASE_URL` is set. If it is unset, the runtime stays on the in-memory adapter.
+The durable/vector path is intended to run with `REPO_MEMORY_EMBEDDING_PROVIDER=openai` and a valid `OPENAI_API_KEY`.
 
 ## How To Use It
 
@@ -94,6 +102,8 @@ Available knobs:
 - `database_url`
 - `embedding_provider`
 - `embedding_dimensions`
+- `embedding_model`
+- `embedding_version`
 - `repo_scope_only`
 - `max_core_memory_tokens`
 - `core_block_token_budgets`
@@ -129,7 +139,7 @@ runtime = RepoMemoryRuntime(
 )
 ```
 
-The default server wiring now reads `REPO_MEMORY_BACKEND`, `REPO_MEMORY_DATABASE_URL`, `REPO_MEMORY_EMBEDDING_PROVIDER`, and `REPO_MEMORY_EMBEDDING_DIMENSIONS` through `RepoMemoryConfig`.
+The default server wiring now reads `REPO_MEMORY_BACKEND`, `REPO_MEMORY_DATABASE_URL`, `REPO_MEMORY_EMBEDDING_PROVIDER`, `REPO_MEMORY_EMBEDDING_DIMENSIONS`, `REPO_MEMORY_EMBEDDING_MODEL`, and `REPO_MEMORY_EMBEDDING_VERSION` through `RepoMemoryConfig`.
 
 ## Behavior
 
@@ -140,7 +150,7 @@ The current flow is:
 3. Event memory stores append-only repo events such as design decisions and watchouts.
 4. The standalone Dreaming daemon discovers all repos from Postgres, claims a per-repo lease, reads new signals after the current Dreaming cursor, and updates durable claims and snapshots.
 5. Dreaming converts events into source-derived claims, revalidates them by `claim_kind`, and compiles repo-core snapshots tagged with a `source_watermark`.
-6. Before-model middleware injects the latest snapshot plus a small overlay built only from signals newer than the snapshot watermark. If no snapshot exists yet, it falls back to the legacy block compiler.
+6. Before-model middleware injects the latest snapshot plus a small overlay built only from signals newer than the snapshot watermark. If no snapshot exists yet, it falls back to the legacy block compiler instead of running Dreaming inline inside the agent process.
 7. Retrieval tools search current entities and repo history without mutating exact tool outputs. On the Postgres path, entity retrieval uses persisted pgvector embeddings; on the in-memory path, it falls back to lexical ranking.
 
 ## Testing
@@ -162,7 +172,7 @@ Key smoke tests:
 
 - The in-memory adapter is still the default when no database URL is configured.
 - The Postgres schema is created lazily by the adapter rather than through a separate migration system.
-- The default embedding provider is deterministic local hashing; external embedding services are not wired yet.
+- OpenAI embeddings are the canonical provider for the durable/pgvector path; deterministic local hashing remains only as an explicit offline fallback for tests or constrained local development.
 - Docker-backed validation depends on a running local Docker daemon.
 - Git provenance is best-effort and deep history is still lightweight.
 - Full sandbox harness e2e is not verified beyond the focused repo-memory tests.

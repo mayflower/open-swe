@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 
@@ -112,9 +112,9 @@ class MemoryClaim:
     last_revalidated_at: datetime | None = None
     revalidation_mode: RevalidationMode = RevalidationMode.EVIDENCE_ONLY
     embedding: list[float] = field(default_factory=list)
-    embedding_provider: str = "hashed"
-    embedding_dimensions: int = 16
-    embedding_version: str = "v1"
+    embedding_provider: str = "openai"
+    embedding_dimensions: int = 1536
+    embedding_version: str = "text-embedding-3-small:1536"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

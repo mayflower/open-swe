@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,8 +13,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test env
 from .config import RepoMemoryConfig
 from .persistence.repositories import create_repo_memory_store
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass(slots=True)
 class RepoMemoryRuntime:
@@ -25,9 +21,6 @@ class RepoMemoryRuntime:
     config: RepoMemoryConfig = field(default_factory=RepoMemoryConfig)
     sandbox_backend: Any | None = None
     work_dir: str | None = None
-    dreaming_daemon_thread: threading.Thread | None = None
-    dreaming_daemon_stop: threading.Event = field(default_factory=threading.Event)
-    dreaming_daemon_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 DEFAULT_RUNTIME = RepoMemoryRuntime(repo="unknown")
@@ -77,49 +70,6 @@ def bind_runtime_context(
     if work_dir:
         runtime.work_dir = work_dir
     return runtime
-
-
-def ensure_repo_memory_dreaming_daemon(runtime: RepoMemoryRuntime) -> threading.Thread | None:
-    from .dreaming import run_repo_memory_dreaming_pass, supports_dreaming
-
-    if not runtime.repo or not supports_dreaming(runtime.store):
-        return None
-
-    with runtime.dreaming_daemon_lock:
-        current = runtime.dreaming_daemon_thread
-        if current is not None and current.is_alive():
-            return current
-
-        runtime.dreaming_daemon_stop.clear()
-
-        def _runner() -> None:
-            worker_id = f"dreaming-daemon:{runtime.repo}"
-            while not runtime.dreaming_daemon_stop.is_set():
-                try:
-                    run_repo_memory_dreaming_pass(runtime, worker_id=worker_id)
-                except Exception:
-                    logger.exception("repo_memory_dreaming_daemon_failed repo=%s", runtime.repo)
-                if runtime.dreaming_daemon_stop.wait(
-                    runtime.config.dreaming_daemon_poll_interval_seconds
-                ):
-                    break
-
-        thread = threading.Thread(
-            target=_runner,
-            name=f"repo-memory-dreaming:{runtime.repo}",
-            daemon=True,
-        )
-        runtime.dreaming_daemon_thread = thread
-        thread.start()
-        logger.info("repo_memory_dreaming_daemon_started repo=%s", runtime.repo)
-        return thread
-
-
-def stop_repo_memory_dreaming_daemon(runtime: RepoMemoryRuntime, *, timeout: float = 1.0) -> None:
-    runtime.dreaming_daemon_stop.set()
-    thread = runtime.dreaming_daemon_thread
-    if thread is not None and thread.is_alive():
-        thread.join(timeout=timeout)
 
 
 def runtime_attr(runtime: object, name: str, default: Any = None) -> Any:

@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps dreaming-up dreaming-logs dreaming-ps
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps dreaming-up dreaming-logs dreaming-ps dreaming-reembed
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -36,6 +36,9 @@ dreaming-logs:
 
 dreaming-ps:
 	docker compose -f docker-compose.postgres.yml ps postgres repo-memory-dreaming
+
+dreaming-reembed:
+	docker compose -f docker-compose.postgres.yml run --rm repo-memory-dreaming /bin/bash -lc "uv sync --frozen --no-dev && uv run repo-memory-dreaming-daemon --reembed-all"
 
 ######################
 # TESTING
@@ -90,6 +93,7 @@ help:
 	@echo 'dreaming-up                  - start local Postgres + Dreaming daemon'
 	@echo 'dreaming-logs                - follow Dreaming daemon logs'
 	@echo 'dreaming-ps                  - show Dreaming daemon + Postgres status'
+	@echo 'dreaming-reembed             - run one full embedding backfill for all repos'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

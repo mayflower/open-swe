@@ -19,7 +19,11 @@ from agent.repo_memory.state import create_repo_memory_state
 
 def test_end_to_end_repo_memory_flow_uses_automatic_runtime_handoff_and_flush() -> None:
     store = InMemoryRepoMemoryStore()
-    runtime = RepoMemoryRuntime(repo="repo", store=store, config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        store=store,
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.sandbox_backend = _FakeBackend(
         files={"agent/feature.py": "def helper(value):\n    return value.strip()\n"}
     )

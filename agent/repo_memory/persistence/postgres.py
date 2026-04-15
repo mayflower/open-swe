@@ -245,6 +245,8 @@ class PostgresRepoMemoryStore:
     _schema_lock: threading.Lock = field(init=False, default_factory=threading.Lock)
 
     def list_repositories(self) -> list[str]:
+        self._ensure_schema()
+
         async def _op() -> list[str]:
             conn = await asyncpg.connect(self.database_url)
             try:
@@ -1485,9 +1487,9 @@ class PostgresRepoMemoryStore:
                     last_revalidated_at TIMESTAMPTZ NULL,
                     revalidation_mode TEXT NOT NULL,
                     embedding VECTOR({self.embedding_provider.dimensions}) NULL,
-                    embedding_provider TEXT NOT NULL DEFAULT 'hashed',
+                    embedding_provider TEXT NOT NULL DEFAULT '{self.embedding_provider.provider_name}',
                     embedding_dimensions INTEGER NOT NULL DEFAULT {self.embedding_provider.dimensions},
-                    embedding_version TEXT NOT NULL DEFAULT 'v1',
+                    embedding_version TEXT NOT NULL DEFAULT '{self.embedding_provider.version}',
                     metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     UNIQUE (repo, claim_key),
                     UNIQUE (repo, source_identity_key)

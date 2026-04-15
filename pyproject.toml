@@ -25,6 +25,7 @@ dependencies = [
     "langchain-runloop>=0.0.4",
     "exa-py>=2.12.0",
     "asyncpg>=0.30.0",
+    "openai>=2.29.0",
 ]
 
 [project.scripts]

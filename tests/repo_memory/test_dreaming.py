@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from agent.repo_memory.config import RepoMemoryConfig
-from agent.repo_memory.daemon import run_repo_memory_dreaming_cycle
+from agent.repo_memory.daemon import reembed_repo_memory_repo, run_repo_memory_dreaming_cycle
 from agent.repo_memory.domain import (
     ClaimEvidence,
     ClaimKind,
@@ -29,7 +29,7 @@ from agent.repo_memory.runtime import RepoMemoryRuntime, bind_runtime_context
 
 def test_upsert_candidate_claim_uses_source_identity_over_text() -> None:
     store = InMemoryRepoMemoryStore()
-    config = RepoMemoryConfig()
+    config = RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16)
     now = datetime(2026, 4, 15, tzinfo=UTC)
     initial_event = RepoEvent(
         repo="repo",
@@ -79,7 +79,7 @@ def test_upsert_candidate_claim_uses_source_identity_over_text() -> None:
 
 def test_related_merge_resolves_second_source_identity_via_claim_evidence() -> None:
     store = InMemoryRepoMemoryStore()
-    config = RepoMemoryConfig()
+    config = RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16)
     now = datetime(2026, 4, 15, tzinfo=UTC)
     first_candidate, first_evidence = build_candidate_claims_from_events(
         "repo",
@@ -201,7 +201,7 @@ def test_score_and_transition_applies_claim_kind_specific_revalidation() -> None
         store,
         "repo",
         now=now + timedelta(hours=1),
-        config=RepoMemoryConfig(),
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
     )
 
     rescored = {claim.claim_key: claim for claim in store.list_claims("repo")}
@@ -214,7 +214,11 @@ def test_score_and_transition_applies_claim_kind_specific_revalidation() -> None
 
 def test_dreaming_snapshot_uses_watermark_and_overlay_deduplicates_snapshot_claims() -> None:
     store = InMemoryRepoMemoryStore()
-    runtime = RepoMemoryRuntime(repo="repo", store=store, config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        store=store,
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     store.append_repo_event(
         RepoEvent(
             repo="repo",
@@ -283,7 +287,11 @@ def test_dreaming_snapshot_uses_watermark_and_overlay_deduplicates_snapshot_clai
 
 def test_run_repo_memory_dreaming_pass_tracks_cursor_snapshot_and_runs() -> None:
     store = InMemoryRepoMemoryStore()
-    runtime = RepoMemoryRuntime(repo="repo", store=store, config=RepoMemoryConfig())
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        store=store,
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     store.append_repo_event(
         RepoEvent(
             repo="repo",
@@ -333,8 +341,12 @@ def test_run_repo_memory_dreaming_pass_tracks_cursor_snapshot_and_runs() -> None
     )
 
 
-def test_build_injection_payload_bootstraps_dreaming_snapshot_when_missing() -> None:
-    runtime = RepoMemoryRuntime(repo="repo", store=InMemoryRepoMemoryStore(), config=RepoMemoryConfig())
+def test_build_injection_payload_falls_back_when_dreaming_snapshot_is_missing() -> None:
+    runtime = RepoMemoryRuntime(
+        repo="repo",
+        store=InMemoryRepoMemoryStore(),
+        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+    )
     runtime.store.append_repo_event(
         RepoEvent(
             repo="repo",
@@ -366,10 +378,8 @@ def test_build_injection_payload_bootstraps_dreaming_snapshot_when_missing() -> 
         }
     )
 
-    snapshot = runtime.store.get_latest_repo_core_snapshot("repo")
     assert payload is not None
-    assert snapshot is not None
-    assert snapshot.source_watermark == 2
+    assert runtime.store.get_latest_repo_core_snapshot("repo") is None
     assert "Prefer shared normalization helpers." in payload["messages"][0]["content"][0]["text"]
 
 
@@ -377,17 +387,22 @@ def test_bind_runtime_context_does_not_start_in_process_dreaming_daemon() -> Non
     runtime = RepoMemoryRuntime(
         repo="repo",
         store=InMemoryRepoMemoryStore(),
-        config=RepoMemoryConfig(dreaming_daemon_poll_interval_seconds=30),
+        config=RepoMemoryConfig(
+            dreaming_daemon_poll_interval_seconds=30,
+            embedding_provider="hashed",
+            embedding_dimensions=16,
+        ),
     )
     bound = bind_runtime_context(runtime, sandbox_backend=object(), work_dir="/workspace")
 
     assert bound is runtime
-    assert runtime.dreaming_daemon_thread is None
+    assert runtime.sandbox_backend is not None
+    assert runtime.work_dir == "/workspace"
 
 
 def test_standalone_dreaming_daemon_cycle_discovers_all_repos() -> None:
     store = InMemoryRepoMemoryStore()
-    config = RepoMemoryConfig()
+    config = RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16)
     for repo in ("repo-a", "repo-b"):
         store.append_repo_event(
             RepoEvent(
@@ -423,6 +438,47 @@ def test_standalone_dreaming_daemon_cycle_discovers_all_repos() -> None:
     assert store.get_dreaming_cursor("repo-b") == 2
     assert store.get_latest_repo_core_snapshot("repo-a") is not None
     assert store.get_latest_repo_core_snapshot("repo-b") is not None
+
+
+def test_reembed_repo_memory_repo_refreshes_claim_embeddings() -> None:
+    store = InMemoryRepoMemoryStore()
+    now = datetime(2026, 4, 15, tzinfo=UTC)
+    claim = MemoryClaim(
+        claim_id="claim-1",
+        claim_key="claim-1",
+        source_identity_key="repo_event:1",
+        repo="repo",
+        scope_kind=ClaimScopeKind.REPO,
+        scope_ref="repo",
+        claim_kind=ClaimKind.DESIGN_DECISION,
+        text="Prefer shared normalization helpers.",
+        normalized_text="prefer shared normalization helpers",
+        status=ClaimStatus.ACTIVE,
+        embedding=[1.0, 0.0, 0.0],
+        embedding_provider="legacy",
+        embedding_dimensions=3,
+        embedding_version="legacy-v1",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    store.upsert_claim(claim)
+
+    summary = reembed_repo_memory_repo(
+        store,
+        "repo",
+        config=RepoMemoryConfig(
+            embedding_provider="hashed",
+            embedding_dimensions=16,
+            embedding_version="sha256-token-v1",
+        ),
+    )
+
+    refreshed = store.list_claims("repo")[0]
+    assert summary == {"entities": 0, "claims": 1}
+    assert refreshed.embedding_provider == "hashed"
+    assert refreshed.embedding_dimensions == 16
+    assert refreshed.embedding_version == "sha256-token-v1"
+    assert len(refreshed.embedding) == 16
 
 
 def test_postgres_dreaming_pass_persists_claims_snapshot_and_cursor(
