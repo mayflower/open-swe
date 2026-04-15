@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from datetime import datetime
 from typing import Any
 
 
@@ -23,6 +24,34 @@ class RepoEventKind(StrEnum):
     DECISION = "decision"
     WATCHOUT = "watchout"
     OBSERVATION = "observation"
+
+
+class ClaimScopeKind(StrEnum):
+    REPO = "repo"
+    PATH = "path"
+    ENTITY = "entity"
+
+
+class ClaimKind(StrEnum):
+    DESIGN_DECISION = "design_decision"
+    WATCHOUT = "watchout"
+    HIGH_IMPACT_CHANGE = "high_impact_change"
+    REUSE_HINT = "reuse_hint"
+
+
+class ClaimStatus(StrEnum):
+    CANDIDATE = "candidate"
+    ACTIVE = "active"
+    CONTESTED = "contested"
+    STALE = "stale"
+    PROMOTED = "promoted"
+    ARCHIVED = "archived"
+
+
+class RevalidationMode(StrEnum):
+    STRICT_LIVE_STATE = "strict_live_state"
+    EVIDENCE_ONLY = "evidence_only"
+    MANUAL_REVIEW = "manual_review"
 
 
 @dataclass(slots=True)
@@ -62,6 +91,85 @@ class RepoCoreBlock:
     value: str
     token_budget: int
     read_only: bool = True
+
+
+@dataclass(slots=True)
+class MemoryClaim:
+    claim_id: str
+    claim_key: str
+    source_identity_key: str
+    repo: str
+    scope_kind: ClaimScopeKind
+    scope_ref: str
+    claim_kind: ClaimKind
+    text: str
+    normalized_text: str
+    status: ClaimStatus
+    score: float = 0.0
+    score_components: dict[str, float] = field(default_factory=dict)
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    last_revalidated_at: datetime | None = None
+    revalidation_mode: RevalidationMode = RevalidationMode.EVIDENCE_ONLY
+    embedding: list[float] = field(default_factory=list)
+    embedding_provider: str = "hashed"
+    embedding_dimensions: int = 16
+    embedding_version: str = "v1"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ClaimEvidence:
+    evidence_id: str
+    repo: str
+    claim_key: str
+    run_id: str | None
+    evidence_kind: str
+    evidence_ref: str
+    evidence_text: str
+    weight: float
+    observed_at: datetime
+    source_thread_id: str | None = None
+    source_path: str | None = None
+    source_entity_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RepoCoreSnapshot:
+    snapshot_id: str
+    repo: str
+    compiled_at: datetime
+    source_watermark: int
+    blocks: list[RepoCoreBlock]
+    source_claim_keys: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DreamRun:
+    run_id: str
+    repo: str
+    run_kind: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    worker_id: str | None = None
+    cursor_before: int = 0
+    cursor_after: int = 0
+    signal_count: int = 0
+    claim_candidate_count: int = 0
+    merged_count: int = 0
+    promoted_count: int = 0
+    snapshot_id: str | None = None
+    summary: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DreamingLease:
+    repo: str
+    worker_id: str
+    expires_at: datetime
 
 
 @dataclass(slots=True)
@@ -118,4 +226,3 @@ class RepoFile:
 
 def make_repo_event_id(repo: str, observed_seq: int, kind: RepoEventKind) -> str:
     return f"{repo}:{kind.value}:{observed_seq}"
-

@@ -19,5 +19,26 @@ services:
       retries: 10
       start_period: 5s
 
+  repo-memory-dreaming:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-swe-repo-memory-dreaming
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      REPO_MEMORY_BACKEND: postgres
+      REPO_MEMORY_DATABASE_URL: postgresql://open_swe:open_swe@postgres:5432/open_swe
+      PYTHONPATH: /workspace
+    command:
+      - /bin/bash
+      - -lc
+      - uv sync --frozen --no-dev && uv run repo-memory-dreaming-daemon
+
 volumes:
   postgres_data:

@@ -44,6 +44,12 @@ class RepoMemoryConfig:
     same_language_bonus: float = 2.0
     same_kind_bonus: float = 1.0
     freshness_bonus: float = 0.5
+    dreaming_merge_similarity_threshold: float = 0.82
+    dreaming_related_similarity_threshold: float = 0.6
+    dreaming_overlay_similarity_threshold: float = 0.8
+    dreaming_overlay_max_items: int = 4
+    dreaming_daemon_poll_interval_seconds: int = 30
+    dreaming_daemon_lease_ttl_seconds: int = 60
 
     def resolved_backend(self) -> str:
         if self.backend != "auto":
