@@ -7,6 +7,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 SandboxFactory = Callable[[str | None], SandboxBackendProtocol]
 
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
+    "agent_sandbox": ("agent.integrations.agent_sandbox", "create_agent_sandbox"),
     "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
     "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),
     "modal": ("agent.integrations.modal", "create_modal_sandbox"),
@@ -31,7 +32,7 @@ def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, local.
+    Supported values: agent_sandbox, langsmith (default), daytona, modal, runloop, local.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
