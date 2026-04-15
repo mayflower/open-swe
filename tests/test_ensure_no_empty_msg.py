@@ -122,6 +122,13 @@ class TestCheckIfModelMessagedUser:
 
         assert check_if_model_messaged_user(messages) is True
 
+    def test_returns_true_for_jira_comment(self) -> None:
+        messages = [
+            ToolMessage(content="commented", tool_call_id="123", name="jira_comment"),
+        ]
+
+        assert check_if_model_messaged_user(messages) is True
+
     def test_returns_false_for_other_tools(self) -> None:
         messages = [
             ToolMessage(content="result", tool_call_id="123", name="bash"),
@@ -206,6 +213,21 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
                 HumanMessage(content="fix the bug"),
                 ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
                 ToolMessage(content="commented", tool_call_id="2", name="github_comment"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+
+    def test_returns_none_with_jira_comment_instead_of_slack(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
+                ToolMessage(content="commented", tool_call_id="2", name="jira_comment"),
                 empty_ai,
             ]
         }

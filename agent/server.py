@@ -6,6 +6,8 @@
 import logging
 import os
 import warnings
+from collections.abc import Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ from .tools import (
     get_pr_review_comments,
     github_comment,
     http_request,
+    jira_comment,
+    jira_get_issue,
+    jira_get_issue_comments,
     linear_comment,
     linear_create_issue,
     linear_delete_issue,
@@ -64,6 +69,7 @@ from .utils.github_app import get_github_app_installation_token
 from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracker_context import resolve_tracker_context
 
 client = get_client()
 
@@ -190,6 +196,76 @@ DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 
+BASE_TOOLS = [
+    http_request,
+    fetch_url,
+    web_search,
+    list_repos,
+    get_branch_name,
+    commit_and_open_pr,
+    list_pr_reviews,
+    get_pr_review,
+    get_pr_review_comments,
+    create_pr_review,
+    update_pr_review,
+    dismiss_pr_review,
+    submit_pr_review,
+    list_pr_review_comments,
+]
+
+LINEAR_TRACKER_TOOLS = [
+    linear_comment,
+    linear_create_issue,
+    linear_delete_issue,
+    linear_get_issue,
+    linear_get_issue_comments,
+    linear_list_teams,
+    linear_update_issue,
+]
+
+JIRA_TRACKER_TOOLS = [
+    jira_comment,
+    jira_get_issue,
+    jira_get_issue_comments,
+]
+
+SLACK_REPLY_TOOLS = [slack_thread_reply, slack_read_thread_messages]
+GITHUB_REPLY_TOOLS = [github_comment]
+
+
+def build_prompt_context(configurable: Mapping[str, Any]) -> dict[str, str]:
+    tracker_context = resolve_tracker_context(configurable)
+    return {
+        "source": tracker_context.source,
+        "reply_tool_name": tracker_context.reply_tool_name,
+        "issue_ref": tracker_context.issue_ref,
+    }
+
+
+def get_tools_for_source(source: str) -> list[Any]:
+    """Return the tool surface for a specific tracker or channel source."""
+    tools = list(BASE_TOOLS)
+
+    if source == "linear":
+        tools.extend(LINEAR_TRACKER_TOOLS)
+    elif source == "jira":
+        tools.extend(JIRA_TRACKER_TOOLS)
+    elif source == "slack":
+        tools.extend(SLACK_REPLY_TOOLS)
+    elif source == "github":
+        tools.extend(GITHUB_REPLY_TOOLS)
+
+    return tools
+
+
+def build_agent_middleware() -> list[Any]:
+    return [
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+        open_pr_if_needed,
+    ]
+
 
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
@@ -271,9 +347,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             "git config --global user.name 'open-swe[bot]' && git config --global user.email 'open-swe@users.noreply.github.com'",
         )
 
-    linear_issue = config["configurable"].get("linear_issue", {})
-    linear_project_id = linear_issue.get("linear_project_id", "")
-    linear_issue_number = linear_issue.get("linear_issue_number", "")
+    tracker_context = resolve_tracker_context(config["configurable"])
+    prompt_context = build_prompt_context(config["configurable"])
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -287,40 +362,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model=make_model(model_id, **model_kwargs),
         system_prompt=construct_system_prompt(
             working_dir=work_dir,
-            linear_project_id=linear_project_id,
-            linear_issue_number=linear_issue_number,
+            **prompt_context,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            list_repos,
-            get_branch_name,
-            commit_and_open_pr,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_update_issue,
-            slack_read_thread_messages,
-            slack_thread_reply,
-            github_comment,
-            get_pr_review_comments,
-            list_pr_reviews,
-            get_pr_review,
-            create_pr_review,
-            update_pr_review,
-            dismiss_pr_review,
-            submit_pr_review,
-            list_pr_review_comments,
-        ],
+        tools=get_tools_for_source(tracker_context.source),
         backend=sandbox_backend,
-        middleware=[
-            ToolErrorMiddleware(),
-            check_message_queue_before_model,
-            ensure_no_empty_msg,
-            open_pr_if_needed,
-        ],
+        middleware=build_agent_middleware(),
     ).with_config(config)

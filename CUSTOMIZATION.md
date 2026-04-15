@@ -8,11 +8,12 @@ model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
 model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
 if model_id == DEFAULT_LLM_MODEL_ID:
     model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+source = resolve_tracker_context(config["configurable"]).source
 
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
+    tools=get_tools_for_source(source),
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -193,6 +194,7 @@ Open SWE ships with five custom tools on top of the built-in Deep Agents tools (
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
+| `jira_comment` | `agent/tools/jira_comment.py` | Post comments on Jira Cloud issues |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
 
 ### Adding a tool
@@ -241,39 +243,44 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`. The only tool that's essential to the core workflow is `commit_and_open_pr`.
+If you only use one source, keep the shared tools and remove the unused source-specific reply tools from `get_tools_for_source()`. If you don't need web fetching, remove `fetch_url`. The only tool that's essential to the core workflow is `commit_and_open_pr`.
 
 ### Conditional tools
 
-You can vary the toolset based on the trigger source:
+Open SWE already varies the toolset by trigger source:
 
 ```python
-base_tools = [http_request, fetch_url, commit_and_open_pr]
-source = config["configurable"].get("source")
+BASE_TOOLS = [http_request, fetch_url, commit_and_open_pr]
+LINEAR_TRACKER_TOOLS = [linear_comment, linear_get_issue]
+JIRA_TRACKER_TOOLS = [jira_comment, jira_get_issue]
 
-if source == "linear":
-    tools = [*base_tools, linear_comment]
-elif source == "slack":
-    tools = [*base_tools, slack_thread_reply]
-else:
-    tools = [*base_tools, linear_comment, slack_thread_reply]
-
-return create_deep_agent(tools=tools, ...)
+def get_tools_for_source(source: str) -> list:
+    tools = [*BASE_TOOLS]
+    if source == "linear":
+        tools.extend(LINEAR_TRACKER_TOOLS)
+    elif source == "jira":
+        tools.extend(JIRA_TRACKER_TOOLS)
+    elif source == "slack":
+        tools.append(slack_thread_reply)
+    elif source == "github":
+        tools.append(github_comment)
+    return tools
 ```
 
 ---
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports four invocation surfaces: Linear, Jira Cloud, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
 
 ### Removing a trigger
 
-If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
+If you don't use Linear, Jira, or Slack, simply don't configure those webhooks and remove the env vars. The webhook endpoints still exist but won't receive events.
 
 To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
 
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
+- **Jira**: `jira_webhook()` and `process_jira_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
 
 ### Default repository
@@ -288,11 +295,12 @@ DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
 These are used as the fallback when:
 - A Slack message doesn't specify a repo (and no thread metadata exists)
 - A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A Jira issue's project key isn't in the `JIRA_PROJECT_TO_REPO` mapping
 - A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
 
 ### Repository extraction from messages
 
-Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+Slack, Linear, and Jira support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
@@ -316,6 +324,19 @@ LINEAR_TEAM_TO_REPO = {
 ```
 
 Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+
+### Customizing Jira routing
+
+The `JIRA_PROJECT_TO_REPO` dict in `agent/utils/jira_project_repo_map.py` maps Jira project keys to GitHub repos:
+
+```python
+JIRA_PROJECT_TO_REPO = {
+    "OPS": {"owner": "my-org", "name": "platform"},
+    "WEB": {"owner": "my-org", "name": "frontend"},
+}
+```
+
+Users can also override the project mapping on a per-comment basis by including `repo:owner/name` in the triggering Jira comment. This takes priority over the mapping. Current support is Jira Cloud only, comment-triggered only, with text-first ADF handling.
 
 ### Customizing Slack routing
 

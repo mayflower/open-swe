@@ -94,14 +94,12 @@ FILE_MANAGEMENT_SECTION = """---
 - Use the appropriate package manager to install dependencies if needed."""
 
 
-TASK_EXECUTION_SECTION = """---
+TASK_EXECUTION_SECTION_TEMPLATE = """---
 
 ### Task Execution
 
 If you make changes, communicate updates in the source channel:
-- Use `linear_comment` for Linear-triggered tasks.
-- Use `slack_thread_reply` for Slack-triggered tasks.
-- Use `github_comment` for GitHub-triggered tasks.
+- This run is `{source}`-triggered. Use `{reply_tool_name}` for updates and final responses.
 
 For tasks that require code changes, follow this order:
 
@@ -109,19 +107,21 @@ For tasks that require code changes, follow this order:
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
-5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with a summary and the PR link.
+5. **Comment** — Call `{reply_tool_name}` with a summary and the PR link.
 
 **Strict requirement:** You must call `commit_and_open_pr` before posting any completion message for a code change task. Only claim "PR updated/opened" if `commit_and_open_pr` returns `success` and a PR link. If it returns "No changes detected" or any error, you must state that explicitly and do not claim an update.
 
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with your answer. Never leave a question unanswered."""
+2. **Comment** — Call `{reply_tool_name}` with your answer. Never leave a question unanswered."""
 
 
-TOOL_USAGE_SECTION = """---
+TOOL_USAGE_SECTION_TEMPLATE = """---
 
 ### Tool Usage
+
+For this run, prefer `{reply_tool_name}` when you need to communicate back through the originating tracker or channel.
 
 #### `list_repos`
 Lists GitHub repositories for a given organization or user via the GitHub API. Pass `organization_name` to specify which org or user to query. Set `is_organization=False` for personal user accounts (defaults to True). Call this first to find the right repo for your task.
@@ -143,6 +143,9 @@ Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a P
 
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!".
+
+#### `jira_comment`
+Posts a comment to a Jira issue. Use this when the task was triggered from Jira so status updates and completion notes go back to the Jira ticket.
 
 #### `slack_thread_reply`
 Posts a message to the active Slack thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Slack.
@@ -257,7 +260,7 @@ When reviewing code changes:
 9. **Prefer pre-made scripts** for testing, formatting, linting, etc. If unsure whether a script exists, search for it first."""
 
 
-COMMIT_PR_SECTION = """---
+COMMIT_PR_SECTION_TEMPLATE = """---
 
 ### Committing Changes and Opening Pull Requests
 
@@ -282,7 +285,7 @@ When you have completed your implementation, follow these steps in order:
 
    **PR Title** (under 70 characters):
    ```
-   <type>: <concise description> [closes {linear_project_id}-{linear_issue_number}]
+   <type>: <concise description> [closes {issue_ref}]
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
 
@@ -305,9 +308,8 @@ When you have completed your implementation, follow these steps in order:
 **IMPORTANT: Never claim a PR was created or updated unless `commit_and_open_pr` returned `success` and a PR link. If it returns "No changes detected" or any error, report that instead.**
 
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
-   - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
-   - Slack-triggered: use `slack_thread_reply`
-   - GitHub-triggered: use `github_comment`
+   - Use `{reply_tool_name}` for this run's source channel (`{source}`)
+   - For Slack-triggered runs, keep using Slack mrkdwn formatting when you call `slack_thread_reply`
 
    Example:
    ```
@@ -318,37 +320,54 @@ When you have completed your implementation, follow these steps in order:
    - <change 2>
    ```
 
-Always call `commit_and_open_pr` followed by the appropriate reply tool once implementation is complete and code quality checks pass."""
+Always call `commit_and_open_pr` followed by `{reply_tool_name}` once implementation is complete and code quality checks pass."""
 
 
-SYSTEM_PROMPT_TEMPLATE = (
-    WORKING_ENV_SECTION
-    + TASK_OVERVIEW_SECTION
-    + "{default_prompt_section}"
-    + REPO_SETUP_SECTION
-    + FILE_MANAGEMENT_SECTION
-    + TASK_EXECUTION_SECTION
-    + TOOL_USAGE_SECTION
-    + TOOL_BEST_PRACTICES_SECTION
-    + CODING_STANDARDS_SECTION
-    + CORE_BEHAVIOR_SECTION
-    + DEPENDENCY_SECTION
-    + CODE_REVIEW_GUIDELINES_SECTION
-    + COMMUNICATION_SECTION
-    + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
-    + COMMIT_PR_SECTION
-)
+def _normalize_source(source: str) -> str:
+    return source or "tracker"
+
+
+def _normalize_reply_tool_name(reply_tool_name: str) -> str:
+    return reply_tool_name or "<REPLY_TOOL_NAME>"
+
+
+def _normalize_issue_ref(issue_ref: str) -> str:
+    return issue_ref or "<ISSUE_REF>"
 
 
 def construct_system_prompt(
     working_dir: str,
-    linear_project_id: str = "",
-    linear_issue_number: str = "",
+    source: str = "",
+    reply_tool_name: str = "",
+    issue_ref: str = "",
 ) -> str:
+    normalized_source = _normalize_source(source)
+    normalized_reply_tool_name = _normalize_reply_tool_name(reply_tool_name)
+    normalized_issue_ref = _normalize_issue_ref(issue_ref)
     default_prompt_section = _load_default_prompt()
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    return (
+        WORKING_ENV_SECTION
+        + TASK_OVERVIEW_SECTION
+        + default_prompt_section
+        + REPO_SETUP_SECTION
+        + FILE_MANAGEMENT_SECTION
+        + TASK_EXECUTION_SECTION_TEMPLATE.format(
+            source=normalized_source,
+            reply_tool_name=normalized_reply_tool_name,
+        )
+        + TOOL_USAGE_SECTION_TEMPLATE.format(reply_tool_name=normalized_reply_tool_name)
+        + TOOL_BEST_PRACTICES_SECTION
+        + CODING_STANDARDS_SECTION
+        + CORE_BEHAVIOR_SECTION
+        + DEPENDENCY_SECTION
+        + CODE_REVIEW_GUIDELINES_SECTION
+        + COMMUNICATION_SECTION
+        + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
+        + COMMIT_PR_SECTION_TEMPLATE.format(
+            issue_ref=normalized_issue_ref,
+            reply_tool_name=normalized_reply_tool_name,
+            source=normalized_source,
+        )
+    ).format(
         working_dir=working_dir,
-        linear_project_id=linear_project_id or "<PROJECT_ID>",
-        linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        default_prompt_section=default_prompt_section,
     )
