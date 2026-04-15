@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, timedelta
 
 from agent.repo_memory.config import RepoMemoryConfig
-from agent.repo_memory.daemon import reembed_repo_memory_repo, run_repo_memory_dreaming_cycle
+from agent.repo_memory.daemon import (
+    main as dreaming_daemon_main,
+)
+from agent.repo_memory.daemon import (
+    reembed_repo_memory_repo,
+    run_repo_memory_dreaming_cycle,
+)
 from agent.repo_memory.domain import (
     ClaimEvidence,
     ClaimKind,
@@ -536,3 +543,52 @@ def test_postgres_dreaming_pass_persists_claims_snapshot_and_cursor(
     assert snapshot.source_watermark == 2
     assert reloaded.get_dreaming_cursor("repo") == 2
     assert runs[-1].status == "succeeded"
+
+
+def test_postgres_dreaming_daemon_main_processes_repo_via_real_entrypoint(
+    postgres_store: PostgresRepoMemoryStore,
+    postgres_url: str,
+    monkeypatch,
+) -> None:
+    postgres_store.append_repo_event(
+        RepoEvent(
+            repo="repo",
+            event_id="decision:1",
+            kind=RepoEventKind.DECISION,
+            summary="Prefer shared normalization helpers.",
+            observed_seq=1,
+            path="agent/feature.py",
+        )
+    )
+    postgres_store.append_repo_event(
+        RepoEvent(
+            repo="repo",
+            event_id="decision:2",
+            kind=RepoEventKind.DECISION,
+            summary="Shared normalization helpers are preferred.",
+            observed_seq=2,
+            path="agent/feature.py",
+        )
+    )
+    monkeypatch.setenv("REPO_MEMORY_BACKEND", "postgres")
+    monkeypatch.setenv("REPO_MEMORY_DATABASE_URL", postgres_url)
+    monkeypatch.setenv("REPO_MEMORY_EMBEDDING_PROVIDER", "hashed")
+    monkeypatch.setenv("REPO_MEMORY_EMBEDDING_DIMENSIONS", "16")
+    monkeypatch.setattr(sys, "argv", ["repo-memory-dreaming-daemon", "--once"])
+
+    assert dreaming_daemon_main() == 0
+
+    reloaded = PostgresRepoMemoryStore(
+        database_url=postgres_url,
+        embedding_provider=postgres_store.embedding_provider,
+    )
+    claims = reloaded.list_claims("repo")
+    snapshot = reloaded.get_latest_repo_core_snapshot("repo")
+    runs = reloaded.list_dream_runs("repo")
+
+    assert len(claims) == 1
+    assert claims[0].metadata["merged_source_identities"] == ["decision:2"]
+    assert snapshot is not None
+    assert snapshot.source_watermark == 2
+    assert runs[-1].status == "succeeded"
+    assert runs[-1].run_kind == "daemon"

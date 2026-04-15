@@ -41,7 +41,7 @@ services:
     command:
       - /bin/bash
       - -lc
-      - uv sync --frozen --no-dev && uv run repo-memory-dreaming-daemon
+      - uv sync --frozen --no-dev && uv run repo-memory-migrate && uv run repo-memory-dreaming-daemon
 
 volumes:
   postgres_data:

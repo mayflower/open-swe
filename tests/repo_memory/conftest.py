@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import time
+from pathlib import Path
 
 import asyncpg
 import pytest
 
 from agent.repo_memory.config import RepoMemoryConfig
+from agent.repo_memory.persistence.migrations import apply_repo_memory_migrations
 from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
 from agent.repo_memory.persistence.repositories import create_repo_memory_store
 from agent.repo_memory.runtime import _RUNTIME_REGISTRY
 
 DEFAULT_POSTGRES_URL = "postgresql://open_swe:open_swe@localhost:5432/open_swe"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+_POSTGRES_HARNESS_STATUS: dict[str, tuple[bool, str | None]] = {}
 
 
 def _can_connect(database_url: str) -> bool:
@@ -29,6 +35,41 @@ def _can_connect(database_url: str) -> bool:
         return False
 
 
+def _ensure_postgres_service(database_url: str) -> None:
+    cached = _POSTGRES_HARNESS_STATUS.get(database_url)
+    if cached is not None:
+        ok, error = cached
+        if ok:
+            return
+        raise RuntimeError(error or f"Postgres harness previously failed for {database_url}")
+    if _can_connect(database_url):
+        _POSTGRES_HARNESS_STATUS[database_url] = (True, None)
+        return
+    result = subprocess.run(
+        ["docker", "compose", "-f", "docker-compose.postgres.yml", "up", "-d", "postgres"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        if _can_connect(database_url):
+            _POSTGRES_HARNESS_STATUS[database_url] = (True, None)
+            return
+        time.sleep(1)
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    error = (
+        "Postgres repo-memory tests require a reachable pgvector database and could not start "
+        f"the local compose harness at {database_url}. "
+        f"docker compose exit code: {result.returncode}. "
+        f"stdout: {stdout or '<empty>'}. stderr: {stderr or '<empty>'}."
+    )
+    _POSTGRES_HARNESS_STATUS[database_url] = (False, error)
+    raise RuntimeError(error)
+
+
 @pytest.fixture(autouse=True)
 def clear_runtime_registry() -> None:
     _RUNTIME_REGISTRY.clear()
@@ -41,8 +82,8 @@ def postgres_url() -> str:
 
 @pytest.fixture
 def postgres_store(postgres_url: str) -> PostgresRepoMemoryStore:
-    if not _can_connect(postgres_url):
-        pytest.skip(f"Postgres repo-memory tests require a running database at {postgres_url}")
+    _ensure_postgres_service(postgres_url)
+    apply_repo_memory_migrations(postgres_url, vector_dimensions=16)
     config = RepoMemoryConfig(
         backend="postgres",
         database_url=postgres_url,

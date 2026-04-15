@@ -30,6 +30,7 @@ dependencies = [
 
 [project.scripts]
 repo-memory-dreaming-daemon = "agent.repo_memory.daemon:main"
+repo-memory-migrate = "agent.repo_memory.persistence.migrations:main"
 
 [project.optional-dependencies]
 dev = [

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from .config import RepoMemoryConfig
 from .dreaming import run_repo_memory_dreaming_pass, supports_dreaming
 from .embeddings import build_embedding_provider
+from .persistence.migrations import validate_repo_memory_schema
 from .persistence.repositories import create_repo_memory_store
 from .runtime import RepoMemoryRuntime
 
@@ -167,6 +168,13 @@ def main() -> int:
     if config.resolved_backend() != "postgres":
         logger.error("The standalone Dreaming daemon requires the Postgres repo-memory backend.")
         return 2
+    if not config.database_url:
+        logger.error("The standalone Dreaming daemon requires REPO_MEMORY_DATABASE_URL.")
+        return 2
+    validate_repo_memory_schema(
+        config.database_url,
+        vector_dimensions=config.embedding_dimensions,
+    )
     store = create_repo_memory_store(config)
     if args.reembed_repo:
         summary = reembed_repo_memory_repo(store, args.reembed_repo, config=config)

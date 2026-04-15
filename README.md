@@ -151,6 +151,7 @@ This fork includes a local Docker Compose setup for Postgres with `pgvector` ena
 
 ```bash
 make postgres-up
+make repo-memory-migrate
 ```
 
 To run the standalone repo-memory Dreaming daemon in Docker against that same database:
@@ -168,6 +169,7 @@ postgresql://open_swe:open_swe@localhost:5432/open_swe
 Useful commands:
 
 ```bash
+make repo-memory-migrate
 make postgres-ps
 make postgres-logs
 make postgres-down
