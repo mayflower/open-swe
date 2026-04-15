@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps dreaming-up dreaming-logs dreaming-ps
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -17,7 +17,7 @@ install:
 	uv pip install -e .
 
 postgres-up:
-	docker compose -f docker-compose.postgres.yml up -d
+	docker compose -f docker-compose.postgres.yml up -d postgres
 
 postgres-down:
 	docker compose -f docker-compose.postgres.yml down
@@ -27,6 +27,15 @@ postgres-logs:
 
 postgres-ps:
 	docker compose -f docker-compose.postgres.yml ps
+
+dreaming-up:
+	docker compose -f docker-compose.postgres.yml up -d postgres repo-memory-dreaming
+
+dreaming-logs:
+	docker compose -f docker-compose.postgres.yml logs -f repo-memory-dreaming
+
+dreaming-ps:
+	docker compose -f docker-compose.postgres.yml ps postgres repo-memory-dreaming
 
 ######################
 # TESTING
@@ -78,6 +87,9 @@ help:
 	@echo 'postgres-down                - stop local Postgres + pgvector'
 	@echo 'postgres-logs                - follow local Postgres logs'
 	@echo 'postgres-ps                  - show local Postgres status'
+	@echo 'dreaming-up                  - start local Postgres + Dreaming daemon'
+	@echo 'dreaming-logs                - follow Dreaming daemon logs'
+	@echo 'dreaming-ps                  - show Dreaming daemon + Postgres status'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

@@ -153,6 +153,12 @@ This fork includes a local Docker Compose setup for Postgres with `pgvector` ena
 make postgres-up
 ```
 
+To run the standalone repo-memory Dreaming daemon in Docker against that same database:
+
+```bash
+make dreaming-up
+```
+
 Default connection string:
 
 ```bash
@@ -165,6 +171,8 @@ Useful commands:
 make postgres-ps
 make postgres-logs
 make postgres-down
+make dreaming-ps
+make dreaming-logs
 ```
 
 The compose file is [docker-compose.postgres.yml](/Users/johann/src/ml/open-swe/docker-compose.postgres.yml), and the extension is enabled during init by [01-enable-pgvector.sql](/Users/johann/src/ml/open-swe/docker/postgres/initdb/01-enable-pgvector.sql).

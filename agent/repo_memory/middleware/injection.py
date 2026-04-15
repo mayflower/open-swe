@@ -26,6 +26,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test env
 
 from ..compiler import compile_core_memory_blocks, render_repo_memory_message
 from ..config import RepoMemoryConfig
+from ..dreaming import (
+    build_snapshot_injection_blocks,
+    run_repo_memory_dreaming_pass,
+    supports_dreaming,
+)
 from ..runtime import resolve_runtime_from_context, runtime_attr
 from ..state import RepoMemoryState
 from ..sync import flush_runtime_state
@@ -42,16 +47,32 @@ def build_injection_payload(state: dict[str, Any]) -> dict[str, Any] | None:
         return None
     state["repo_memory_runtime"] = runtime
     flushed = flush_runtime_state(state, runtime)
-    events = store.list_repo_events(repo)
-    blocks = compile_core_memory_blocks(
-        repo,
-        events,
-        config.core_block_token_budgets,
-        focus_paths=state.get("focus_paths", []),
-        focus_entities=state.get("focus_entities", []),
-    )
-    for block in blocks:
-        store.set_core_block(repo, block)
+    blocks = None
+    if supports_dreaming(store):
+        snapshot = store.get_latest_repo_core_snapshot(repo)
+        if snapshot is None and store.list_repo_events(repo):
+            try:
+                run_repo_memory_dreaming_pass(runtime, worker_id=f"before-model:{repo}")
+            except Exception:
+                logger.exception("repo_memory_dreaming_bootstrap_failed repo=%s", repo)
+        blocks = build_snapshot_injection_blocks(
+            store,
+            repo,
+            config=config,
+            focus_paths=state.get("focus_paths", []),
+            focus_entities=state.get("focus_entities", []),
+        )
+    if blocks is None:
+        events = store.list_repo_events(repo)
+        blocks = compile_core_memory_blocks(
+            repo,
+            events,
+            config.core_block_token_budgets,
+            focus_paths=state.get("focus_paths", []),
+            focus_entities=state.get("focus_entities", []),
+        )
+        for block in blocks:
+            store.set_core_block(repo, block)
     message = render_repo_memory_message(blocks)
     logger.info(
         "repo_memory_injection repo=%s block_count=%d message_words=%d flushed=%d",

@@ -78,9 +78,14 @@ def test_postgres_store_persists_files_entities_events_and_sync_state(
     assert repo_file.current_revision.observed_seq == 1
     assert entity is not None
     assert entity.current_revision.qualified_name == "helper"
+    assert reloaded.list_repositories() == ["repo"]
     assert [event.event_id for event in reloaded.list_repo_events("repo")] == ["event-1"]
     assert reloaded.list_core_blocks("repo")[0].label == "active_design_decisions"
-    assert reloaded.get_sync_state("repo") == {"last_observed_seq": 2, "last_compiled_seq": 2}
+    assert reloaded.get_sync_state("repo") == {
+        "last_observed_seq": 2,
+        "last_compiled_seq": 2,
+        "dreaming_cursor": 0,
+    }
 
 
 def test_postgres_store_records_lineage(postgres_store: PostgresRepoMemoryStore) -> None:

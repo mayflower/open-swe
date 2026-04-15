@@ -83,7 +83,46 @@ def build_metadata() -> MemoryMetadata:
             ColumnSpec("repo", "text"),
             ColumnSpec("last_observed_seq", "int"),
             ColumnSpec("last_compiled_seq", "int"),
+            ColumnSpec("dreaming_cursor", "int"),
+        ),
+        "memory_claims": _table(
+            "memory_claims",
+            ColumnSpec("claim_id", "text"),
+            ColumnSpec("claim_key", "text"),
+            ColumnSpec("source_identity_key", "text"),
+            ColumnSpec("repo", "text"),
+            ColumnSpec("claim_kind", "text"),
+            ColumnSpec("status", "text"),
+            ColumnSpec("embedding", "vector", nullable=True),
+        ),
+        "claim_evidence": _table(
+            "claim_evidence",
+            ColumnSpec("evidence_id", "text"),
+            ColumnSpec("repo", "text"),
+            ColumnSpec("claim_key", "text"),
+            ColumnSpec("evidence_kind", "text"),
+            ColumnSpec("evidence_ref", "text"),
+        ),
+        "repo_core_snapshots": _table(
+            "repo_core_snapshots",
+            ColumnSpec("snapshot_id", "text"),
+            ColumnSpec("repo", "text"),
+            ColumnSpec("source_watermark", "int"),
+            ColumnSpec("blocks", "jsonb"),
+        ),
+        "dream_runs": _table(
+            "dream_runs",
+            ColumnSpec("run_id", "text"),
+            ColumnSpec("repo", "text"),
+            ColumnSpec("status", "text"),
+            ColumnSpec("cursor_before", "int"),
+            ColumnSpec("cursor_after", "int"),
+        ),
+        "dreaming_leases": _table(
+            "dreaming_leases",
+            ColumnSpec("repo", "text"),
+            ColumnSpec("worker_id", "text"),
+            ColumnSpec("expires_at", "timestamptz"),
         ),
     }
     return MemoryMetadata(tables=tables)
-

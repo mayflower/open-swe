@@ -27,6 +27,9 @@ dependencies = [
     "asyncpg>=0.30.0",
 ]
 
+[project.scripts]
+repo-memory-dreaming-daemon = "agent.repo_memory.daemon:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.3",

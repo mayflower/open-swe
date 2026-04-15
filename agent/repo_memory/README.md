@@ -2,12 +2,15 @@
 
 Repository memory is a repo-scoped memory layer for Open SWE. It tracks file changes and focus areas during agent execution, extracts code entities from supported languages, records repo decisions and events, compiles a compact "core memory" before model calls, and exposes retrieval/history tools for reuse.
 
+The current branch also includes a Dreaming layer on top of repo memory. Dreaming consolidates repo events into durable claims, scores and revalidates them, compiles snapshot blocks with a high-water-mark, and serves before-model context as `snapshot + fresh overlay`.
+
 ## Current Status
 
 - Wired into `get_agent()` in `agent/server.py`
 - Enabled automatically for execution-mode agents when repo metadata is present
 - Supports `InMemoryRepoMemoryStore` for local/default execution
 - Supports `PostgresRepoMemoryStore` as the durable backend when `REPO_MEMORY_DATABASE_URL` is set
+- Supports a standalone Dreaming daemon process that discovers all repos from Postgres
 - Supported parsers: Python, TypeScript, Go, Rust
 - Current tools:
   - `remember_repo_decision`
@@ -28,6 +31,12 @@ If you want a local Postgres instance for the next persistence step, this repo n
 
 ```bash
 make postgres-up
+```
+
+If you also want the standalone Dreaming daemon in Docker:
+
+```bash
+make dreaming-up
 ```
 
 Default connection string:
@@ -71,7 +80,8 @@ At runtime:
 - before-model injection resolves the repo-memory runtime from agent metadata and flushes dirty files automatically
 - `execute` can mark repo memory dirty through `dirty_execute_exit_codes`, and the next before-model step probes changed paths from git-style name-status output
 - repo decisions can be stored as events
-- a separate system message with compiled repo memory is injected before model calls
+- a standalone Dreaming daemon process can continuously fold repo events into claims and snapshots without living inside the agent server
+- before-model injection prefers Dreaming snapshots plus a watermark-based fresh overlay, and falls back to legacy block compilation if no snapshot exists yet
 - retrieval tools can search current entities and prior repo events
 
 ## Configuration
@@ -95,6 +105,12 @@ Available knobs:
 - `same_language_bonus`
 - `same_kind_bonus`
 - `freshness_bonus`
+- `dreaming_merge_similarity_threshold`
+- `dreaming_related_similarity_threshold`
+- `dreaming_overlay_similarity_threshold`
+- `dreaming_overlay_max_items`
+- `dreaming_daemon_poll_interval_seconds`
+- `dreaming_daemon_lease_ttl_seconds`
 
 Example custom runtime:
 
@@ -120,11 +136,12 @@ The default server wiring now reads `REPO_MEMORY_BACKEND`, `REPO_MEMORY_DATABASE
 The current flow is:
 
 1. Tool middleware updates `dirty_paths`, `focus_paths`, and `focus_entities`.
-2. Before-model middleware resolves the runtime, probes git-style changed paths when `dirty_unknown` is set, and flushes bounded dirty files into repo memory before compiling context.
-3. Event memory stores append-only repo events such as design decisions.
-4. The flush path routes parsed files and entities into either the in-memory adapter or the Postgres-backed store, depending on runtime config.
-5. Before-model middleware compiles core memory blocks and injects them as a separate system message.
-6. Retrieval tools search current entities and repo history without mutating exact tool outputs. On the Postgres path, entity retrieval uses persisted pgvector embeddings; on the in-memory path, it falls back to lexical ranking.
+2. Before-model middleware resolves the runtime, probes git-style changed paths when `dirty_unknown` is set, and flushes bounded dirty files into repo memory before building context.
+3. Event memory stores append-only repo events such as design decisions and watchouts.
+4. The standalone Dreaming daemon discovers all repos from Postgres, claims a per-repo lease, reads new signals after the current Dreaming cursor, and updates durable claims and snapshots.
+5. Dreaming converts events into source-derived claims, revalidates them by `claim_kind`, and compiles repo-core snapshots tagged with a `source_watermark`.
+6. Before-model middleware injects the latest snapshot plus a small overlay built only from signals newer than the snapshot watermark. If no snapshot exists yet, it falls back to the legacy block compiler.
+7. Retrieval tools search current entities and repo history without mutating exact tool outputs. On the Postgres path, entity retrieval uses persisted pgvector embeddings; on the in-memory path, it falls back to lexical ranking.
 
 ## Testing
 
@@ -149,4 +166,4 @@ Key smoke tests:
 - Docker-backed validation depends on a running local Docker daemon.
 - Git provenance is best-effort and deep history is still lightweight.
 - Full sandbox harness e2e is not verified beyond the focused repo-memory tests.
-- The current implementation is wired through the existing Open SWE server path, not a standalone subsystem.
+- The Dreaming layer currently derives claims from repo events, not from a broader trace ingestion pipeline.
