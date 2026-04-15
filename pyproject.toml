@@ -21,8 +21,10 @@ dependencies = [
     "langsmith>=0.7.32",
     "langchain-openai==1.1.13",
     "langchain-daytona>=0.0.5",
+    "langchain-agent-sandbox @ git+https://github.com/mayflower/agent-sandbox.git@feat-langchain-deepagents-backend-dev#subdirectory=clients/python/langchain-agent-sandbox",
     "langchain-modal>=0.0.3",
     "langchain-runloop>=0.0.4",
+    "k8s-agent-sandbox @ git+https://github.com/mayflower/agent-sandbox.git@feat-langchain-deepagents-backend-dev#subdirectory=clients/python/agentic-sandbox-client",
     "exa-py>=2.12.0",
 ]
 

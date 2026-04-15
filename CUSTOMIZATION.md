@@ -48,6 +48,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
+| `agent_sandbox` | `agent/integrations/agent_sandbox.py` | `AGENT_SANDBOX_TEMPLATE_NAME`, `AGENT_SANDBOX_NAMESPACE`, `SANDBOX_TYPE="agent_sandbox"` |
 | `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
 | `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
@@ -55,6 +56,81 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+### Using `agent_sandbox`
+
+Open SWE can also bind to an existing sandbox from the `agent_sandbox` stack. The important architectural choice is that Open SWE still owns lifecycle: it creates or reconnects raw sandboxes through `SandboxClient`, then wraps them with `AgentSandboxBackend.from_existing(...)`. It intentionally does **not** use an adapter factory or the managed lifecycle path from the upstream SDK.
+
+Required environment variables:
+
+```bash
+SANDBOX_TYPE="agent_sandbox"
+AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+AGENT_SANDBOX_NAMESPACE="open-swe"
+```
+
+Optional environment variables:
+
+```bash
+AGENT_SANDBOX_ROOT_DIR="/app"
+AGENT_SANDBOX_CONNECTION_MODE="tunnel"   # tunnel | gateway | direct
+AGENT_SANDBOX_READY_TIMEOUT="180"
+AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+AGENT_SANDBOX_GATEWAY_NAME="sandbox-gateway"
+AGENT_SANDBOX_GATEWAY_NAMESPACE="sandbox-system"
+AGENT_SANDBOX_API_URL="https://agent-sandbox.example.internal"
+```
+
+Operational notes:
+
+- Supported connection modes are `tunnel`, `gateway`, and `direct`.
+- Open SWE refreshes sandbox-local GitHub credentials with short-lived GitHub App installation tokens before network git operations.
+- Thread metadata stores the namespace-qualified sandbox id, for example `team-a/claim-123`, so reconnects stay provider-agnostic.
+
+Copy-paste examples:
+
+`tunnel`
+
+```bash
+SANDBOX_TYPE="agent_sandbox"
+AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+AGENT_SANDBOX_NAMESPACE="open-swe"
+AGENT_SANDBOX_CONNECTION_MODE="tunnel"
+AGENT_SANDBOX_ROOT_DIR="/app"
+AGENT_SANDBOX_READY_TIMEOUT="180"
+AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+```
+
+`gateway`
+
+```bash
+SANDBOX_TYPE="agent_sandbox"
+AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+AGENT_SANDBOX_NAMESPACE="open-swe"
+AGENT_SANDBOX_CONNECTION_MODE="gateway"
+AGENT_SANDBOX_GATEWAY_NAME="sandbox-gateway"
+AGENT_SANDBOX_GATEWAY_NAMESPACE="sandbox-system"
+AGENT_SANDBOX_ROOT_DIR="/app"
+AGENT_SANDBOX_READY_TIMEOUT="180"
+AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+```
+
+`direct`
+
+```bash
+SANDBOX_TYPE="agent_sandbox"
+AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+AGENT_SANDBOX_NAMESPACE="open-swe"
+AGENT_SANDBOX_CONNECTION_MODE="direct"
+AGENT_SANDBOX_API_URL="https://agent-sandbox.example.internal"
+AGENT_SANDBOX_ROOT_DIR="/app"
+AGENT_SANDBOX_READY_TIMEOUT="180"
+AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+```
 
 ### Adding a new sandbox provider
 

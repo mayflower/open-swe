@@ -27,6 +27,7 @@ from ..utils.github import (
 )
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
+from ..utils.sandbox_github_auth import configure_github_network_access
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
@@ -145,6 +146,14 @@ def commit_and_open_pr(
         pr_body = add_pr_collaboration_note(body, user_identity)
 
         has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
+        fetch_token = asyncio.run(get_github_app_installation_token())
+        if not fetch_token:
+            return {
+                "success": False,
+                "error": "Failed to get GitHub App installation token",
+                "pr_url": None,
+            }
+        configure_github_network_access(sandbox_backend, fetch_token)
         git_fetch_origin(sandbox_backend, repo_dir)
         has_unpushed_commits = git_has_unpushed_commits(sandbox_backend, repo_dir)
 
@@ -190,19 +199,28 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        installation_token = asyncio.run(get_github_app_installation_token())
-        if not installation_token:
+        push_token = asyncio.run(get_github_app_installation_token())
+        if not push_token:
             return {
                 "success": False,
                 "error": "Failed to get GitHub App installation token",
                 "pr_url": None,
             }
+        configure_github_network_access(sandbox_backend, push_token)
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch)
         if push_result.exit_code != 0:
             return {
                 "success": False,
                 "error": f"Git push failed: {push_result.output.strip()}",
+                "pr_url": None,
+            }
+
+        installation_token = asyncio.run(get_github_app_installation_token())
+        if not installation_token:
+            return {
+                "success": False,
+                "error": "Failed to get GitHub App installation token",
                 "pr_url": None,
             }
 

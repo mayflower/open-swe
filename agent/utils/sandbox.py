@@ -1,5 +1,6 @@
 import os
 
+from agent.integrations.agent_sandbox import create_agent_sandbox
 from agent.integrations.daytona import create_daytona_sandbox
 from agent.integrations.langsmith import create_langsmith_sandbox
 from agent.integrations.local import create_local_sandbox
@@ -7,6 +8,7 @@ from agent.integrations.modal import create_modal_sandbox
 from agent.integrations.runloop import create_runloop_sandbox
 
 SANDBOX_FACTORIES = {
+    "agent_sandbox": create_agent_sandbox,
     "langsmith": create_langsmith_sandbox,
     "daytona": create_daytona_sandbox,
     "modal": create_modal_sandbox,
@@ -19,7 +21,7 @@ def create_sandbox(sandbox_id: str | None = None):
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, local.
+    Supported values: agent_sandbox, langsmith (default), daytona, modal, runloop, local.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
