@@ -32,6 +32,7 @@ If you want a local Postgres instance for the next persistence step, this repo n
 
 ```bash
 make postgres-up
+make repo-memory-migrate
 ```
 
 If you also want the standalone Dreaming daemon in Docker:
@@ -52,7 +53,7 @@ Default connection string:
 postgresql://open_swe:open_swe@localhost:5432/open_swe
 ```
 
-The `vector` extension is created automatically on first startup.
+The Postgres harness enables `pgvector` during init, and repo-memory schema objects are applied by the explicit migration command. The Postgres store validates that the schema is already migrated before serving requests.
 
 Repo memory switches to the Postgres-backed store automatically when `REPO_MEMORY_DATABASE_URL` is set. If it is unset, the runtime stays on the in-memory adapter.
 The durable/vector path is intended to run with `REPO_MEMORY_EMBEDDING_PROVIDER=openai` and a valid `OPENAI_API_KEY`.
@@ -89,6 +90,7 @@ At runtime:
 - `execute` can mark repo memory dirty through `dirty_execute_exit_codes`, and the next before-model step probes changed paths from git-style name-status output
 - repo decisions can be stored as events
 - a standalone Dreaming daemon process can continuously fold repo events into claims and snapshots without living inside the agent server
+- the standalone Dreaming daemon validates the migrated schema at startup and relies on Postgres leases for repo-scoped single-worker execution
 - before-model injection prefers Dreaming snapshots plus a watermark-based fresh overlay, and falls back to legacy block compilation if no snapshot exists yet
 - retrieval tools can search current entities and prior repo events
 
@@ -152,6 +154,7 @@ The current flow is:
 5. Dreaming converts events into source-derived claims, revalidates them by `claim_kind`, and compiles repo-core snapshots tagged with a `source_watermark`.
 6. Before-model middleware injects the latest snapshot plus a small overlay built only from signals newer than the snapshot watermark. If no snapshot exists yet, it falls back to the legacy block compiler instead of running Dreaming inline inside the agent process.
 7. Retrieval tools search current entities and repo history without mutating exact tool outputs. On the Postgres path, entity retrieval uses persisted pgvector embeddings; on the in-memory path, it falls back to lexical ranking.
+8. The durable Postgres path requires the explicit migration step. If the schema is missing or out of date, the store and daemon fail fast with a migration error instead of creating tables implicitly.
 
 ## Testing
 
@@ -163,6 +166,8 @@ Run the focused suite with:
 make test TEST_FILE=tests/repo_memory/
 ```
 
+Postgres-backed repo-memory tests now try to start the local Compose harness automatically and fail if a real pgvector database cannot be reached.
+
 Key smoke tests:
 
 - `tests/repo_memory/test_end_to_end_repo_memory.py`
@@ -171,7 +176,7 @@ Key smoke tests:
 ## Limitations
 
 - The in-memory adapter is still the default when no database URL is configured.
-- The Postgres schema is created lazily by the adapter rather than through a separate migration system.
+- The Postgres path now depends on an explicit migration step (`uv run repo-memory-migrate` or `make repo-memory-migrate`).
 - OpenAI embeddings are the canonical provider for the durable/pgvector path; deterministic local hashing remains only as an explicit offline fallback for tests or constrained local development.
 - Docker-backed validation depends on a running local Docker daemon.
 - Git provenance is best-effort and deep history is still lightweight.

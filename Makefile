@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps dreaming-up dreaming-logs dreaming-ps dreaming-reembed
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps repo-memory-migrate dreaming-up dreaming-logs dreaming-ps dreaming-reembed
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -28,6 +28,9 @@ postgres-logs:
 postgres-ps:
 	docker compose -f docker-compose.postgres.yml ps
 
+repo-memory-migrate:
+	uv run repo-memory-migrate
+
 dreaming-up:
 	docker compose -f docker-compose.postgres.yml up -d postgres repo-memory-dreaming
 
@@ -38,7 +41,7 @@ dreaming-ps:
 	docker compose -f docker-compose.postgres.yml ps postgres repo-memory-dreaming
 
 dreaming-reembed:
-	docker compose -f docker-compose.postgres.yml run --rm repo-memory-dreaming /bin/bash -lc "uv sync --frozen --no-dev && uv run repo-memory-dreaming-daemon --reembed-all"
+	docker compose -f docker-compose.postgres.yml run --rm repo-memory-dreaming /bin/bash -lc "uv sync --frozen --no-dev && uv run repo-memory-migrate && uv run repo-memory-dreaming-daemon --reembed-all"
 
 ######################
 # TESTING
@@ -90,6 +93,7 @@ help:
 	@echo 'postgres-down                - stop local Postgres + pgvector'
 	@echo 'postgres-logs                - follow local Postgres logs'
 	@echo 'postgres-ps                  - show local Postgres status'
+	@echo 'repo-memory-migrate          - apply repo-memory Postgres migrations'
 	@echo 'dreaming-up                  - start local Postgres + Dreaming daemon'
 	@echo 'dreaming-logs                - follow Dreaming daemon logs'
 	@echo 'dreaming-ps                  - show Dreaming daemon + Postgres status'
