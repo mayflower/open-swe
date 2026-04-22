@@ -17,13 +17,15 @@ from .persistence.repositories import create_repo_memory_store
 @dataclass(slots=True)
 class RepoMemoryRuntime:
     repo: str
-    store: object = field(default_factory=lambda: create_repo_memory_store(RepoMemoryConfig()))
+    store: object = field(default=None)
     config: RepoMemoryConfig = field(default_factory=RepoMemoryConfig)
     sandbox_backend: Any | None = None
     work_dir: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.store is None:
+            self.store = create_repo_memory_store(self.config)
 
-DEFAULT_RUNTIME = RepoMemoryRuntime(repo="unknown")
 
 _RUNTIME_REGISTRY: dict[str, RepoMemoryRuntime] = {}
 

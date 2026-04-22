@@ -311,11 +311,18 @@ class InMemoryRepoMemoryStore:
 
 
 def create_repo_memory_store(config: RepoMemoryConfig) -> InMemoryRepoMemoryStore | PostgresRepoMemoryStore:
-    if config.resolved_backend() == "postgres":
+    backend = config.resolved_backend()
+    if backend == "postgres":
         if not config.database_url:
             raise ValueError("REPO_MEMORY_DATABASE_URL is required for postgres repo memory")
         return PostgresRepoMemoryStore(
             database_url=config.database_url,
             embedding_provider=build_embedding_provider(config),
         )
-    return InMemoryRepoMemoryStore()
+    if backend == "memory":
+        return InMemoryRepoMemoryStore()
+    raise ValueError(
+        "Repo memory backend is unresolved. Set REPO_MEMORY_BACKEND=postgres with "
+        "REPO_MEMORY_DATABASE_URL for production, or REPO_MEMORY_BACKEND=memory for tests. "
+        f"Got backend={backend!r}."
+    )

@@ -9,6 +9,8 @@ from pathlib import Path
 import asyncpg
 import pytest
 
+os.environ.setdefault("REPO_MEMORY_ALLOW_IN_MEMORY", "true")
+
 from agent.repo_memory.config import RepoMemoryConfig
 from agent.repo_memory.persistence.migrations import apply_repo_memory_migrations
 from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore

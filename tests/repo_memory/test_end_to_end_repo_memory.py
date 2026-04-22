@@ -44,7 +44,9 @@ def test_end_to_end_repo_memory_flow_uses_automatic_runtime_handoff_and_flush() 
         "agent.repo_memory.middleware.injection.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
-        payload = asyncio.run(inject_repo_memory_before_model(state, runtime=object()))
+        payload = asyncio.run(
+            inject_repo_memory_before_model.abefore_model(state, object())
+        )
     results = search_similar_code_results(
         store.iter_entities("repo"),
         "helper reuse duplicate code",
@@ -97,7 +99,9 @@ def test_end_to_end_repo_memory_flow_persists_and_retrieves_through_postgres(
         "agent.repo_memory.middleware.injection.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
-        payload = asyncio.run(inject_repo_memory_before_model(state, runtime=object()))
+        payload = asyncio.run(
+            inject_repo_memory_before_model.abefore_model(state, object())
+        )
 
     reloaded_store = PostgresRepoMemoryStore(
         database_url=postgres_url,

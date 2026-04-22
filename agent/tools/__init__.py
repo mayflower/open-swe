@@ -31,6 +31,7 @@ linear_update_issue = _optional_attr(".linear_update_issue", "linear_update_issu
 list_repos = _optional_attr(".list_repos", "list_repos")
 remember_repo_decision = _optional_attr(".remember_repo_decision", "remember_repo_decision")
 search_similar_code = _optional_attr(".search_similar_code", "search_similar_code")
+search_repo_memory = _optional_attr(".search_repo_memory", "search_repo_memory")
 slack_read_thread_messages = _optional_attr(
     ".slack_read_thread_messages", "slack_read_thread_messages"
 )
@@ -66,6 +67,7 @@ __all__ = [
     "linear_update_issue",
     "list_repos",
     "remember_repo_decision",
+    "search_repo_memory",
     "search_similar_code",
     "slack_read_thread_messages",
     "slack_thread_reply",

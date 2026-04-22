@@ -71,6 +71,7 @@ def test_get_agent_registers_repo_memory_wiring() -> None:
     assert any(type(item).__name__ == "RepoMemoryToolMiddleware" for item in middleware)
     assert any(
         getattr(item, "__name__", "") == "inject_repo_memory_before_model"
+        or type(item).__name__ == "inject_repo_memory_before_model"
         for item in middleware
     )
 
