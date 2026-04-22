@@ -131,9 +131,12 @@ async def validate_repo_memory_schema_async(
                 )
         if vector_dimensions is not None:
             for table_name in ("entity_revisions", "memory_claims"):
+                # pgvector stores the dimension directly in atttypmod (no
+                # 4-byte varlen offset). NULLIF filters the -1 "untyped"
+                # sentinel so the caller can tell when the column is missing.
                 stored_dimensions = await conn.fetchval(
                     """
-                    SELECT NULLIF(a.atttypmod, -1) - 4
+                    SELECT NULLIF(a.atttypmod, -1)
                     FROM pg_attribute a
                     JOIN pg_class c ON c.oid = a.attrelid
                     JOIN pg_namespace n ON n.oid = c.relnamespace

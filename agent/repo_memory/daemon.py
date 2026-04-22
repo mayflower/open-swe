@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .config import RepoMemoryConfig
-from .dreaming import run_repo_memory_dreaming_pass, supports_dreaming
+from .dreaming import (
+    PromotionExplanation,
+    explain_dreaming_promotions,
+    run_repo_memory_dreaming_pass,
+    supports_dreaming,
+)
 from .embeddings import build_embedding_provider
 from .persistence.migrations import validate_repo_memory_schema
 from .persistence.repositories import create_repo_memory_store
@@ -26,6 +31,17 @@ def discover_dreaming_repos(store: object) -> list[str]:
         return []
     repos = store.list_repositories()
     return sorted({repo for repo in repos if isinstance(repo, str) and repo})
+
+
+def explain_repo_memory_dreaming(
+    store: object,
+    repo: str,
+    *,
+    config: RepoMemoryConfig,
+    now: datetime | None = None,
+) -> list[PromotionExplanation]:
+    runtime = RepoMemoryRuntime(repo=repo, store=store, config=config)
+    return explain_dreaming_promotions(runtime, now=now)
 
 
 def reembed_repo_memory_repo(
@@ -149,6 +165,15 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Recompute stored claim/entity embeddings for one repo and exit.",
     )
+    parser.add_argument(
+        "--explain",
+        default=None,
+        help=(
+            "Dry-run the Deep-phase scoring for one repo. Prints each claim's "
+            "score, gate outcomes, and would-promote verdict without mutating "
+            "claims or writing a snapshot."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -184,6 +209,21 @@ def main() -> int:
             summary["entities"],
             summary["claims"],
         )
+        return 0
+    if args.explain:
+        explanations = explain_repo_memory_dreaming(store, args.explain, config=config)
+        for explanation in explanations:
+            logger.info(
+                "repo_memory_dreaming_explain repo=%s claim=%s kind=%s status=%s "
+                "score=%.3f would_promote=%s failed_gates=%s",
+                args.explain,
+                explanation.claim_key,
+                explanation.claim_kind,
+                explanation.status,
+                explanation.score,
+                explanation.would_promote,
+                ",".join(explanation.failed_gates) or "-",
+            )
         return 0
     if args.reembed_all:
         summaries = reembed_repo_memory_all_repos(store, config=config)

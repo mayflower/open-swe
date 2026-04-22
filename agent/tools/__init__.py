@@ -16,6 +16,7 @@ from .remember_repo_decision import remember_repo_decision
 from .reply_to_finding_thread import reply_to_finding_thread
 from .request_pr_review import request_pr_review
 from .resolve_finding_thread import resolve_finding_thread
+from .search_repo_memory import search_repo_memory
 from .search_similar_code import search_similar_code
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
@@ -41,6 +42,7 @@ __all__ = [
     "reply_to_finding_thread",
     "request_pr_review",
     "resolve_finding_thread",
+    "search_repo_memory",
     "search_similar_code",
     "slack_read_thread_messages",
     "slack_thread_reply",

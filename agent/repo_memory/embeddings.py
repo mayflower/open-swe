@@ -55,6 +55,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     version: str = "text-embedding-3-small:1536"
     model_name: str = "text-embedding-3-small"
     api_key: str | None = None
+    # OpenAI embedding endpoints cap input at 8192 tokens. We cut by characters
+    # (well under the token limit for code) so we never send an oversize module
+    # body and have retrieval fall over mid-run.
+    max_input_chars: int = 24000
     _client: OpenAI | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -78,7 +82,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def embed_many(self, texts: list[str]) -> list[list[float]]:
         vectors = [[0.0] * self.dimensions for _ in texts]
         pending: list[tuple[int, str]] = [
-            (index, text.strip())
+            (index, self._truncate(text.strip()))
             for index, text in enumerate(texts)
             if text and text.strip()
         ]
@@ -94,6 +98,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             original_index = pending[item.index][0]
             vectors[original_index] = list(item.embedding)
         return vectors
+
+    def _truncate(self, text: str) -> str:
+        if self.max_input_chars <= 0 or len(text) <= self.max_input_chars:
+            return text
+        return text[: self.max_input_chars]
 
 
 def build_embedding_provider(config: RepoMemoryConfig) -> EmbeddingProvider:

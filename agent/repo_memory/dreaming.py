@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 import re
 import time
 import uuid
-from dataclasses import replace
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import RepoMemoryConfig
@@ -40,6 +41,64 @@ _BLOCK_LIMITS = {
     "repo_watchouts": 3,
     "recent_high_impact_changes": 4,
 }
+
+_PHASE_BOOST_METADATA_KEY = "phase_boosts"
+
+
+@dataclass(slots=True)
+class LightPhaseResult:
+    """Result of the Light phase.
+
+    Light ingests new repo events, dedupes via pgvector + Jaccard, and upserts
+    candidate claims with attached evidence. It never promotes and never writes
+    a snapshot. The returned counts are recorded in the DreamRun summary.
+    """
+
+    new_events: int = 0
+    candidate_claims: int = 0
+    merged_claims: int = 0
+    jaccard_merged: int = 0
+    touched_claim_keys: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RemPhaseResult:
+    """Result of the REM phase.
+
+    REM inspects recent claim activity and records a small, capped boost on
+    claims that show repeating themes or cross-source consolidation. It does
+    not mutate claim status.
+    """
+
+    boosted_claim_keys: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DeepPhaseResult:
+    """Result of the Deep phase.
+
+    Deep scores every active/candidate claim, applies the multi-gate promotion
+    check, transitions status, and compiles a snapshot when at least one claim
+    was promoted. Deep is the only phase permitted to write to
+    ``repo_core_snapshots``.
+    """
+
+    scored_claims: int = 0
+    promoted_claims: int = 0
+    snapshot: RepoCoreSnapshot | None = None
+
+
+@dataclass(slots=True)
+class PromotionExplanation:
+    """Per-claim explain payload used by the dry-run preview."""
+
+    claim_key: str
+    claim_kind: str
+    status: str
+    score: float
+    would_promote: bool
+    failed_gates: list[str]
+    score_components: dict[str, float | str]
 
 
 def supports_dreaming(store: object) -> bool:
@@ -134,6 +193,98 @@ def build_candidate_claims_from_events(
     return candidates
 
 
+def run_light_phase(
+    store: object,
+    repo: str,
+    events: list[RepoEvent],
+    *,
+    run_id: str,
+    now: datetime,
+    config: RepoMemoryConfig,
+) -> LightPhaseResult:
+    """Ingest events into candidate claims with pgvector + Jaccard dedup.
+
+    Light stages reinforcement signals. It does not score or promote.
+    """
+    result = LightPhaseResult()
+    result.new_events = len(events)
+    candidates = build_candidate_claims_from_events(repo, events, now=now, config=config)
+    result.candidate_claims = len(candidates)
+
+    for candidate, evidence in candidates:
+        claim, vector_merged, jaccard_merged = _upsert_candidate_with_dedup(
+            store, candidate, evidence, config=config
+        )
+        evidence.claim_key = claim.claim_key
+        evidence.run_id = run_id
+        store.attach_claim_evidence(claim.claim_key, evidence)
+        _record_phase_hit(store, claim, phase="light")
+        result.touched_claim_keys.append(claim.claim_key)
+        if vector_merged:
+            result.merged_claims += 1
+        if jaccard_merged:
+            result.jaccard_merged += 1
+    return result
+
+
+def run_rem_phase(
+    store: object,
+    repo: str,
+    *,
+    now: datetime,
+    config: RepoMemoryConfig,
+    touched_claim_keys: list[str] | None = None,
+) -> RemPhaseResult:
+    """Record REM pattern signals on active claims.
+
+    REM strengthens claims that show cross-source consolidation or concept-tag
+    recurrence. It never mutates ``status``.
+    """
+    result = RemPhaseResult()
+    touched = set(touched_claim_keys or [])
+    for claim in store.list_claims(repo):
+        if touched and claim.claim_key not in touched:
+            continue
+        evidence = list(store.list_claim_evidence(repo, claim.claim_key))
+        if not _has_rem_signal(claim, evidence):
+            continue
+        _record_phase_hit(store, claim, phase="rem")
+        result.boosted_claim_keys.append(claim.claim_key)
+    return result
+
+
+def run_deep_phase(
+    store: object,
+    repo: str,
+    *,
+    source_watermark: int,
+    now: datetime,
+    config: RepoMemoryConfig,
+) -> DeepPhaseResult:
+    """Score every claim, apply the promotion gates, and compile a snapshot.
+
+    Deep is the only phase allowed to write to ``repo_core_snapshots``. The
+    returned snapshot is ``None`` when no claim cleared the gates.
+    """
+    result = DeepPhaseResult()
+    claims_before = store.list_claims(repo)
+    result.scored_claims = len(claims_before)
+    result.promoted_claims = score_and_transition_claims(
+        store, repo, now=now, config=config
+    )
+    snapshot = compile_repo_core_snapshot(
+        store,
+        repo,
+        source_watermark=source_watermark,
+        now=now,
+        config=config,
+    )
+    if snapshot is not None:
+        store.create_repo_core_snapshot(snapshot)
+        result.snapshot = snapshot
+    return result
+
+
 def run_repo_memory_dreaming_pass(
     runtime: object,
     *,
@@ -177,39 +328,32 @@ def run_repo_memory_dreaming_pass(
         run.cursor_before = cursor_before
         store.create_dream_run(run)
 
-        new_events = [event for event in store.list_repo_events(repo) if event.observed_seq > cursor_before]
-        candidates = build_candidate_claims_from_events(
-            repo,
-            new_events,
-            now=run_now,
-            config=config,
+        new_events = [
+            event
+            for event in store.list_repo_events(repo)
+            if event.observed_seq > cursor_before
+        ]
+
+        light = run_light_phase(
+            store, repo, new_events, run_id=run.run_id, now=run_now, config=config
         )
-        run.signal_count = len(new_events)
-        run.claim_candidate_count = len(candidates)
-
-        merged_count = 0
-        for candidate, evidence in candidates:
-            claim, merged = upsert_candidate_claim(store, candidate, evidence, config=config)
-            evidence.claim_key = claim.claim_key
-            evidence.run_id = run.run_id
-            store.attach_claim_evidence(claim.claim_key, evidence)
-            if merged:
-                merged_count += 1
-        run.merged_count = merged_count
-
-        promoted_count = score_and_transition_claims(store, repo, now=run_now, config=config)
-        run.promoted_count = promoted_count
-
-        snapshot = compile_repo_core_snapshot(
+        rem = run_rem_phase(
             store,
             repo,
-            source_watermark=watermark,
             now=run_now,
             config=config,
+            touched_claim_keys=light.touched_claim_keys,
         )
-        if snapshot is not None:
-            store.create_repo_core_snapshot(snapshot)
-            run.snapshot_id = snapshot.snapshot_id
+        deep = run_deep_phase(
+            store, repo, source_watermark=watermark, now=run_now, config=config
+        )
+
+        run.signal_count = light.new_events
+        run.claim_candidate_count = light.candidate_claims
+        run.merged_count = light.merged_claims + light.jaccard_merged
+        run.promoted_count = deep.promoted_claims
+        if deep.snapshot is not None:
+            run.snapshot_id = deep.snapshot.snapshot_id
 
         store.set_dreaming_cursor(repo, watermark)
         run.cursor_after = watermark
@@ -219,7 +363,10 @@ def run_repo_memory_dreaming_pass(
             "signal_count": run.signal_count,
             "claim_candidate_count": run.claim_candidate_count,
             "merged_count": run.merged_count,
+            "jaccard_merged_count": light.jaccard_merged,
             "promoted_count": run.promoted_count,
+            "rem_boosted_count": len(rem.boosted_claim_keys),
+            "scored_count": deep.scored_claims,
             "snapshot_id": run.snapshot_id,
         }
         store.finalize_dream_run(run)
@@ -251,6 +398,59 @@ def run_repo_memory_dreaming_loop(
         if index + 1 < target_iterations:
             sleep_fn(pause)
     return runs
+
+
+def explain_dreaming_promotions(
+    runtime: object,
+    *,
+    now: datetime | None = None,
+) -> list[PromotionExplanation]:
+    """Dry-run the Deep phase scoring and report gate outcomes per claim.
+
+    The store is not mutated — nothing is promoted, no snapshot is written.
+    """
+    repo = runtime_attr(runtime, "repo")
+    store = runtime_attr(runtime, "store")
+    config = runtime_attr(runtime, "config", RepoMemoryConfig()) or RepoMemoryConfig()
+    if not repo or store is None or not supports_dreaming(store):
+        raise ValueError("Repo-memory runtime does not support Dreaming")
+
+    run_now = now or datetime.now(UTC)
+    claims = store.list_claims(repo)
+    claims_by_key = {claim.claim_key: claim for claim in claims}
+    explanations: list[PromotionExplanation] = []
+    for claim in claims:
+        evidence = list(store.list_claim_evidence(repo, claim.claim_key))
+        components, revalidation_passed = _score_components(
+            store,
+            claim,
+            evidence,
+            claims_by_key=claims_by_key,
+            now=run_now,
+            config=config,
+        )
+        score = _combine_score(components)
+        gate_failures = _evaluate_promotion_gates(
+            claim,
+            evidence,
+            score=score,
+            components=components,
+            revalidation_passed=revalidation_passed,
+            config=config,
+            now=run_now,
+        )
+        explanations.append(
+            PromotionExplanation(
+                claim_key=claim.claim_key,
+                claim_kind=claim.claim_kind.value,
+                status=claim.status.value,
+                score=score,
+                would_promote=not gate_failures,
+                failed_gates=gate_failures,
+                score_components=components,
+            )
+        )
+    return explanations
 
 
 def build_snapshot_injection_blocks(
@@ -301,32 +501,13 @@ def upsert_candidate_claim(
     *,
     config: RepoMemoryConfig,
 ) -> tuple[MemoryClaim, bool]:
-    existing = store.get_claim_by_source_identity(candidate.repo, candidate.source_identity_key)
-    if existing is not None:
-        updated = _merge_claim(existing, candidate)
-        stored = store.upsert_claim(updated)
-        return stored, False
-
-    related = store.find_related_claims(
-        candidate.repo,
-        candidate.embedding,
-        claim_kind=candidate.claim_kind,
-        scope_kind=candidate.scope_kind,
-        scope_ref=candidate.scope_ref,
-        limit=3,
+    """Back-compat wrapper. Prefer :func:`run_light_phase` which also applies
+    Jaccard dedup and records phase hits.
+    """
+    claim, vector_merged, jaccard_merged = _upsert_candidate_with_dedup(
+        store, candidate, evidence, config=config
     )
-    if related and related[0][1] >= config.dreaming_merge_similarity_threshold:
-        target, _similarity = related[0]
-        updated = _merge_claim(target, candidate)
-        merged_sources = list(updated.metadata.get("merged_source_identities", []))
-        if candidate.source_identity_key not in merged_sources:
-            merged_sources.append(candidate.source_identity_key)
-        updated.metadata["merged_source_identities"] = merged_sources
-        stored = store.upsert_claim(updated)
-        return stored, True
-
-    stored = store.upsert_claim(candidate)
-    return stored, False
+    return claim, vector_merged or jaccard_merged
 
 
 def score_and_transition_claims(
@@ -336,6 +517,12 @@ def score_and_transition_claims(
     now: datetime,
     config: RepoMemoryConfig,
 ) -> int:
+    """Score and transition every claim for ``repo`` and return promoted count.
+
+    The return type stays an int for backwards compatibility with callers
+    outside the Dreaming pipeline. The Deep phase derives the scored count
+    itself when it needs to report on the full run.
+    """
     claims = store.list_claims(repo)
     if not claims:
         return 0
@@ -349,31 +536,26 @@ def score_and_transition_claims(
             evidence,
             claims_by_key=claims_by_key,
             now=now,
+            config=config,
         )
-        score = max(
-            0.0,
-            min(
-                1.0,
-                (
-                    0.35 * components["frequency_score"]
-                    + 0.25 * components["recency_score"]
-                    + 0.20 * components["diversity_score"]
-                    + 0.10 * components["importance_score"]
-                    + 0.10 * components["revalidation_score"]
-                    - components["contradiction_penalty"]
-                    - components["volatility_penalty"]
-                ),
-            ),
+        score = _combine_score(components)
+        gate_failures = _evaluate_promotion_gates(
+            claim,
+            evidence,
+            score=score,
+            components=components,
+            revalidation_passed=revalidation_passed,
+            config=config,
+            now=now,
         )
-        status = ClaimStatus.CANDIDATE
-        if components["contradiction_penalty"] > 0:
-            status = ClaimStatus.CONTESTED
-        elif not revalidation_passed and claim.revalidation_mode == RevalidationMode.STRICT_LIVE_STATE:
-            status = ClaimStatus.STALE
-        elif score >= 0.78 and revalidation_passed:
-            status = ClaimStatus.PROMOTED
-        elif score >= 0.60 and (revalidation_passed or claim.revalidation_mode == RevalidationMode.EVIDENCE_ONLY):
-            status = ClaimStatus.ACTIVE
+        status = _resolve_status(
+            claim=claim,
+            score=score,
+            components=components,
+            revalidation_passed=revalidation_passed,
+            gate_failures=gate_failures,
+            config=config,
+        )
         updated = replace(
             claim,
             score=score,
@@ -384,6 +566,7 @@ def score_and_transition_claims(
                 **claim.metadata,
                 "applied_revalidation_mode": claim.revalidation_mode.value,
                 "last_revalidation_reason": components["revalidation_reason"],
+                "promotion_gate_failures": gate_failures,
             },
         )
         store.upsert_claim(updated)
@@ -497,6 +680,101 @@ def _merge_claim(existing: MemoryClaim, candidate: MemoryClaim) -> MemoryClaim:
     )
 
 
+def _upsert_candidate_with_dedup(
+    store: object,
+    candidate: MemoryClaim,
+    evidence: ClaimEvidence,
+    *,
+    config: RepoMemoryConfig,
+) -> tuple[MemoryClaim, bool, bool]:
+    existing = store.get_claim_by_source_identity(candidate.repo, candidate.source_identity_key)
+    if existing is not None:
+        updated = _merge_claim(existing, candidate)
+        return store.upsert_claim(updated), False, False
+
+    related = store.find_related_claims(
+        candidate.repo,
+        candidate.embedding,
+        claim_kind=candidate.claim_kind,
+        scope_kind=candidate.scope_kind,
+        scope_ref=candidate.scope_ref,
+        limit=3,
+    )
+    if related and related[0][1] >= config.dreaming_merge_similarity_threshold:
+        target, _similarity = related[0]
+        merged = _merge_claim(target, candidate)
+        merged_sources = list(merged.metadata.get("merged_source_identities", []))
+        if candidate.source_identity_key not in merged_sources:
+            merged_sources.append(candidate.source_identity_key)
+        merged.metadata["merged_source_identities"] = merged_sources
+        return store.upsert_claim(merged), True, False
+
+    jaccard_match = _find_jaccard_match(store, candidate, config)
+    if jaccard_match is not None:
+        merged = _merge_claim(jaccard_match, candidate)
+        merged_sources = list(merged.metadata.get("merged_source_identities", []))
+        if candidate.source_identity_key not in merged_sources:
+            merged_sources.append(candidate.source_identity_key)
+        merged.metadata["merged_source_identities"] = merged_sources
+        return store.upsert_claim(merged), False, True
+
+    return store.upsert_claim(candidate), False, False
+
+
+def _find_jaccard_match(
+    store: object, candidate: MemoryClaim, config: RepoMemoryConfig
+) -> MemoryClaim | None:
+    threshold = config.dreaming_jaccard_dedup_threshold
+    candidate_tokens = _token_set(candidate.normalized_text)
+    if not candidate_tokens:
+        return None
+    best: tuple[MemoryClaim, float] | None = None
+    for claim in store.list_claims(candidate.repo):
+        if claim.claim_key == candidate.claim_key:
+            continue
+        if claim.claim_kind != candidate.claim_kind:
+            continue
+        if claim.scope_kind != candidate.scope_kind or claim.scope_ref != candidate.scope_ref:
+            continue
+        similarity = _jaccard_similarity(candidate_tokens, _token_set(claim.normalized_text))
+        if similarity >= threshold and (best is None or similarity > best[1]):
+            best = (claim, similarity)
+    return best[0] if best is not None else None
+
+
+def _token_set(text: str) -> set[str]:
+    return {token for token in text.split() if token}
+
+
+def _jaccard_similarity(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    intersection = left & right
+    union = left | right
+    if not union:
+        return 0.0
+    return len(intersection) / len(union)
+
+
+def _has_rem_signal(claim: MemoryClaim, evidence: list[ClaimEvidence]) -> bool:
+    distinct_runs = {item.run_id for item in evidence if item.run_id}
+    distinct_threads = {item.source_thread_id for item in evidence if item.source_thread_id}
+    distinct_paths = {item.source_path for item in evidence if item.source_path}
+    return (
+        len(distinct_runs) >= 2
+        or len(distinct_threads) >= 2
+        or len(distinct_paths) >= 2
+    )
+
+
+def _record_phase_hit(store: object, claim: MemoryClaim, *, phase: str) -> None:
+    boosts: dict[str, int] = dict(claim.metadata.get(_PHASE_BOOST_METADATA_KEY, {}))
+    boosts[phase] = int(boosts.get(phase, 0)) + 1
+    updated_metadata = {**claim.metadata, _PHASE_BOOST_METADATA_KEY: boosts}
+    updated = replace(claim, metadata=updated_metadata)
+    store.upsert_claim(updated)
+
+
 def _score_components(
     store: object,
     claim: MemoryClaim,
@@ -504,12 +782,19 @@ def _score_components(
     *,
     claims_by_key: dict[str, MemoryClaim],
     now: datetime,
+    config: RepoMemoryConfig,
 ) -> tuple[dict[str, float | str], bool]:
-    evidence_count = len(evidence)
-    frequency_score = min(evidence_count / 2.0, 1.0)
-    recency_score = _recency_score(now, claim.last_seen_at or claim.first_seen_at or now)
-    diversity_score = _diversity_score(evidence)
-    importance_score = min(max((item.weight for item in evidence), default=0.0), 1.0)
+    relevance_score = _relevance_score(evidence)
+    frequency_score = _frequency_score(evidence)
+    query_diversity_score = _query_diversity_score(evidence)
+    recency_score = _recency_score(
+        now,
+        claim.last_seen_at or claim.first_seen_at or now,
+        half_life_days=config.dreaming_recency_half_life_days,
+    )
+    consolidation_score = _consolidation_score(evidence)
+    conceptual_richness_score = _conceptual_richness_score(claim, evidence)
+    light_boost, rem_boost = _phase_boosts(claim, config)
     revalidation_score, revalidation_passed, revalidation_reason = _revalidate_claim(
         store, claim, evidence
     )
@@ -520,10 +805,14 @@ def _score_components(
     volatility_penalty = _volatility_penalty(claim, claims_by_key, now=now)
     return (
         {
+            "relevance_score": relevance_score,
             "frequency_score": frequency_score,
+            "query_diversity_score": query_diversity_score,
             "recency_score": recency_score,
-            "diversity_score": diversity_score,
-            "importance_score": importance_score,
+            "consolidation_score": consolidation_score,
+            "conceptual_richness_score": conceptual_richness_score,
+            "light_phase_boost": light_boost,
+            "rem_phase_boost": rem_boost,
             "revalidation_score": revalidation_score,
             "contradiction_penalty": contradiction_penalty,
             "volatility_penalty": volatility_penalty,
@@ -533,31 +822,140 @@ def _score_components(
     )
 
 
-def _recency_score(now: datetime, last_seen_at: datetime) -> float:
-    age_hours = max((now - last_seen_at).total_seconds() / 3600.0, 0.0)
-    if age_hours <= 24:
-        return 1.0
-    if age_hours <= 72:
-        return 0.75
-    if age_hours <= 168:
-        return 0.5
-    return 0.25
+def _combine_score(components: dict[str, float | str]) -> float:
+    base = (
+        0.30 * float(components["relevance_score"])
+        + 0.24 * float(components["frequency_score"])
+        + 0.15 * float(components["query_diversity_score"])
+        + 0.15 * float(components["recency_score"])
+        + 0.10 * float(components["consolidation_score"])
+        + 0.06 * float(components["conceptual_richness_score"])
+    )
+    base += float(components["light_phase_boost"])
+    base += float(components["rem_phase_boost"])
+    base -= float(components["contradiction_penalty"])
+    base -= float(components["volatility_penalty"])
+    return max(0.0, min(1.0, base))
 
 
-def _diversity_score(evidence: list[ClaimEvidence]) -> float:
-    dimensions = {
-        "runs": {item.run_id for item in evidence if item.run_id},
-        "threads": {item.source_thread_id for item in evidence if item.source_thread_id},
-        "paths": {item.source_path for item in evidence if item.source_path},
-        "entities": {item.source_entity_id for item in evidence if item.source_entity_id},
-    }
-    parts: list[float] = []
-    for values in dimensions.values():
-        if not values:
-            parts.append(0.5)
+def _evaluate_promotion_gates(
+    claim: MemoryClaim,
+    evidence: list[ClaimEvidence],
+    *,
+    score: float,
+    components: dict[str, float | str],
+    revalidation_passed: bool,
+    config: RepoMemoryConfig,
+    now: datetime,
+) -> list[str]:
+    failures: list[str] = []
+    if score < config.dreaming_promotion_min_score:
+        failures.append(f"score<{config.dreaming_promotion_min_score}")
+    evidence_count = len(evidence)
+    if evidence_count < config.dreaming_promotion_min_evidence_count:
+        failures.append(
+            f"evidence_count<{config.dreaming_promotion_min_evidence_count}"
+        )
+    source_diversity = _source_diversity(evidence)
+    if source_diversity < config.dreaming_promotion_min_source_diversity:
+        failures.append(
+            f"source_diversity<{config.dreaming_promotion_min_source_diversity}"
+        )
+    if not revalidation_passed:
+        failures.append("revalidation_failed")
+    if float(components["contradiction_penalty"]) > 0:
+        failures.append("active_contradiction")
+    last_seen = claim.last_seen_at or claim.first_seen_at or now
+    age_days = max((now - last_seen).total_seconds() / 86400.0, 0.0)
+    if age_days > config.dreaming_max_age_days:
+        failures.append(f"age_days>{config.dreaming_max_age_days}")
+    return failures
+
+
+def _resolve_status(
+    *,
+    claim: MemoryClaim,
+    score: float,
+    components: dict[str, float | str],
+    revalidation_passed: bool,
+    gate_failures: list[str],
+    config: RepoMemoryConfig,
+) -> ClaimStatus:
+    if float(components["contradiction_penalty"]) > 0:
+        return ClaimStatus.CONTESTED
+    if not revalidation_passed and claim.revalidation_mode == RevalidationMode.STRICT_LIVE_STATE:
+        return ClaimStatus.STALE
+    if not gate_failures:
+        return ClaimStatus.PROMOTED
+    if score >= max(0.6, config.dreaming_promotion_min_score - 0.2) and (
+        revalidation_passed or claim.revalidation_mode == RevalidationMode.EVIDENCE_ONLY
+    ):
+        return ClaimStatus.ACTIVE
+    return ClaimStatus.CANDIDATE
+
+
+def _relevance_score(evidence: list[ClaimEvidence]) -> float:
+    if not evidence:
+        return 0.0
+    weights = [max(0.0, min(1.0, item.weight)) for item in evidence]
+    return sum(weights) / len(weights)
+
+
+def _frequency_score(evidence: list[ClaimEvidence]) -> float:
+    if not evidence:
+        return 0.0
+    # Logarithmic accumulation so that the 3rd piece of evidence carries real
+    # weight without letting an arbitrary pile of repeats saturate the signal.
+    return min(math.log2(len(evidence) + 1) / 3.0, 1.0)
+
+
+def _query_diversity_score(evidence: list[ClaimEvidence]) -> float:
+    if not evidence:
+        return 0.0
+    threads = {item.source_thread_id for item in evidence if item.source_thread_id}
+    paths = {item.source_path for item in evidence if item.source_path}
+    entities = {item.source_entity_id for item in evidence if item.source_entity_id}
+    dimensions = [threads, paths, entities]
+    contributions: list[float] = []
+    for dim in dimensions:
+        if not dim:
+            contributions.append(0.5)
         else:
-            parts.append(min(len(values) / 2.0, 1.0))
-    return sum(parts) / len(parts) if parts else 0.0
+            contributions.append(min(len(dim) / 3.0, 1.0))
+    return sum(contributions) / len(contributions)
+
+
+def _recency_score(now: datetime, last_seen_at: datetime, *, half_life_days: float) -> float:
+    age_days = max((now - last_seen_at).total_seconds() / 86400.0, 0.0)
+    if half_life_days <= 0:
+        return 1.0 if age_days == 0 else 0.0
+    return max(0.0, min(1.0, 0.5 ** (age_days / half_life_days)))
+
+
+def _consolidation_score(evidence: list[ClaimEvidence]) -> float:
+    if not evidence:
+        return 0.0
+    runs = {item.run_id for item in evidence if item.run_id}
+    return min(len(runs) / 3.0, 1.0) if runs else 0.0
+
+
+def _conceptual_richness_score(claim: MemoryClaim, evidence: list[ClaimEvidence]) -> float:
+    if not claim.text:
+        return 0.0
+    token_count = len(_TOKEN_RE.findall(claim.text))
+    entity_breadth = len({item.source_entity_id for item in evidence if item.source_entity_id})
+    tokens_component = min(token_count / 24.0, 1.0)
+    entity_component = min(entity_breadth / 3.0, 1.0)
+    return 0.7 * tokens_component + 0.3 * entity_component
+
+
+def _phase_boosts(claim: MemoryClaim, config: RepoMemoryConfig) -> tuple[float, float]:
+    boosts = claim.metadata.get(_PHASE_BOOST_METADATA_KEY, {}) or {}
+    light_hits = int(boosts.get("light", 0))
+    rem_hits = int(boosts.get("rem", 0))
+    light = min(config.dreaming_light_phase_boost_cap, light_hits * 0.01)
+    rem = min(config.dreaming_rem_phase_boost_cap, rem_hits * 0.02)
+    return light, rem
 
 
 def _revalidate_claim(
@@ -600,6 +998,20 @@ def _volatility_penalty(
         if (now - last_seen).total_seconds() <= 72 * 3600:
             siblings += 1
     return min(siblings * 0.15, 0.45)
+
+
+def _source_diversity(evidence: list[ClaimEvidence]) -> int:
+    pool: set[tuple[str, str]] = set()
+    for item in evidence:
+        if item.source_thread_id:
+            pool.add(("thread", item.source_thread_id))
+        if item.source_path:
+            pool.add(("path", item.source_path))
+        if item.source_entity_id:
+            pool.add(("entity", item.source_entity_id))
+    if not pool:
+        return len(evidence)
+    return len(pool)
 
 
 def _event_importance(event: RepoEvent) -> float:

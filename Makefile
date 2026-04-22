@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps repo-memory-migrate dreaming-up dreaming-logs dreaming-ps dreaming-reembed
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps repo-memory-migrate repo-memory-probe dreaming-up dreaming-logs dreaming-ps dreaming-reembed
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -30,6 +30,17 @@ postgres-ps:
 
 repo-memory-migrate:
 	uv run repo-memory-migrate
+
+# End-to-end probe: indexes a repo through Tree-sitter → pgvector, seeds repo
+# events, runs Dreaming twice, prints claims/snapshot/search/explain as JSON.
+#   make repo-memory-probe                      # index current repo, reuse data
+#   make repo-memory-probe PROBE_ARGS="--reset" # clean-slate run
+#   make repo-memory-probe PROBE_PATH=/repo REPO=owner/name
+PROBE_PATH ?= .
+REPO ?= probe/local
+PROBE_ARGS ?=
+repo-memory-probe:
+	uv run repo-memory-probe --path $(PROBE_PATH) --repo $(REPO) $(PROBE_ARGS)
 
 dreaming-up:
 	docker compose -f docker-compose.postgres.yml up -d postgres repo-memory-dreaming
@@ -94,6 +105,7 @@ help:
 	@echo 'postgres-logs                - follow local Postgres logs'
 	@echo 'postgres-ps                  - show local Postgres status'
 	@echo 'repo-memory-migrate          - apply repo-memory Postgres migrations'
+	@echo 'repo-memory-probe            - index a repo + run Dreaming against local Postgres; prints JSON report'
 	@echo 'dreaming-up                  - start local Postgres + Dreaming daemon'
 	@echo 'dreaming-logs                - follow Dreaming daemon logs'
 	@echo 'dreaming-ps                  - show Dreaming daemon + Postgres status'

@@ -65,7 +65,29 @@ def _run_async_blocking(coro: Awaitable[T]) -> T:
 
 
 def _vector_literal(values: Sequence[float]) -> str:
-    return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
+    return "[" + ",".join(f"{float(value):.8f}" for value in values) + "]"
+
+
+def _parse_pgvector(raw: object) -> list[float]:
+    """Normalize pgvector column values into ``list[float]``.
+
+    asyncpg returns pgvector columns as their text representation
+    (``"[0.1,0.2,…]"``) when no custom codec is registered. This helper makes
+    loaders resilient to both the string and list cases without forcing every
+    caller to pay the codec-registration cost.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        trimmed = raw.strip()
+        if not trimmed:
+            return []
+        if trimmed.startswith("[") and trimmed.endswith("]"):
+            trimmed = trimmed[1:-1]
+        if not trimmed:
+            return []
+        return [float(part) for part in trimmed.split(",") if part]
+    return [float(value) for value in raw]
 
 
 def _entity_revision_from_row(row: asyncpg.Record) -> EntityRevision:
@@ -133,7 +155,7 @@ def _core_block_from_row(row: asyncpg.Record) -> RepoCoreBlock:
 def _claim_from_row(row: asyncpg.Record) -> MemoryClaim:
     score_components = row["score_components"] or {}
     metadata = row["metadata"] or {}
-    embedding = row["embedding"] or []
+    embedding = _parse_pgvector(row["embedding"])
     if isinstance(score_components, str):
         score_components = json.loads(score_components)
     if isinstance(metadata, str):
@@ -155,7 +177,7 @@ def _claim_from_row(row: asyncpg.Record) -> MemoryClaim:
         last_seen_at=row["last_seen_at"],
         last_revalidated_at=row["last_revalidated_at"],
         revalidation_mode=RevalidationMode(row["revalidation_mode"]),
-        embedding=list(embedding),
+        embedding=embedding,
         embedding_provider=row["embedding_provider"] or "hashed",
         embedding_dimensions=row["embedding_dimensions"] or len(embedding),
         embedding_version=row["embedding_version"] or "v1",

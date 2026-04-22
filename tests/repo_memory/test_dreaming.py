@@ -24,10 +24,31 @@ from agent.repo_memory.domain import (
 from agent.repo_memory.dreaming import (
     build_candidate_claims_from_events,
     build_snapshot_injection_blocks,
+    explain_dreaming_promotions,
+    run_light_phase,
     run_repo_memory_dreaming_pass,
     score_and_transition_claims,
     upsert_candidate_claim,
 )
+
+
+def _permissive_dreaming_config(**overrides) -> RepoMemoryConfig:
+    """Test config that relaxes OpenClaw-style gates.
+
+    The bulk of the existing Dreaming tests verify orchestration (cursors,
+    watermarks, overlays) rather than gate semantics, so we keep them honest by
+    relaxing only the gate knobs — Jaccard dedup and scoring still run with
+    production values.
+    """
+    base = {
+        "embedding_provider": "hashed",
+        "embedding_dimensions": 16,
+        "dreaming_promotion_min_score": 0.0,
+        "dreaming_promotion_min_evidence_count": 1,
+        "dreaming_promotion_min_source_diversity": 1,
+    }
+    base.update(overrides)
+    return RepoMemoryConfig(**base)
 from agent.repo_memory.middleware.injection import build_injection_payload
 from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
 from agent.repo_memory.persistence.repositories import InMemoryRepoMemoryStore
@@ -224,7 +245,7 @@ def test_dreaming_snapshot_uses_watermark_and_overlay_deduplicates_snapshot_clai
     runtime = RepoMemoryRuntime(
         repo="repo",
         store=store,
-        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+        config=_permissive_dreaming_config(),
     )
     store.append_repo_event(
         RepoEvent(
@@ -297,7 +318,7 @@ def test_run_repo_memory_dreaming_pass_tracks_cursor_snapshot_and_runs() -> None
     runtime = RepoMemoryRuntime(
         repo="repo",
         store=store,
-        config=RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16),
+        config=_permissive_dreaming_config(),
     )
     store.append_repo_event(
         RepoEvent(
@@ -409,7 +430,7 @@ def test_bind_runtime_context_does_not_start_in_process_dreaming_daemon() -> Non
 
 def test_standalone_dreaming_daemon_cycle_discovers_all_repos() -> None:
     store = InMemoryRepoMemoryStore()
-    config = RepoMemoryConfig(embedding_provider="hashed", embedding_dimensions=16)
+    config = _permissive_dreaming_config()
     for repo in ("repo-a", "repo-b"):
         store.append_repo_event(
             RepoEvent(
@@ -495,11 +516,9 @@ def test_postgres_dreaming_pass_persists_claims_snapshot_and_cursor(
     runtime = RepoMemoryRuntime(
         repo="repo",
         store=postgres_store,
-        config=RepoMemoryConfig(
+        config=_permissive_dreaming_config(
             backend="postgres",
             database_url=postgres_url,
-            embedding_provider="hashed",
-            embedding_dimensions=16,
         ),
     )
     postgres_store.append_repo_event(
@@ -550,26 +569,21 @@ def test_postgres_dreaming_daemon_main_processes_repo_via_real_entrypoint(
     postgres_url: str,
     monkeypatch,
 ) -> None:
-    postgres_store.append_repo_event(
-        RepoEvent(
-            repo="repo",
-            event_id="decision:1",
-            kind=RepoEventKind.DECISION,
-            summary="Prefer shared normalization helpers.",
-            observed_seq=1,
-            path="agent/feature.py",
+    # Four near-identical watchout events from distinct operator threads.
+    # Jaccard dedup collapses them into one claim while the evidence keeps
+    # four distinct source_thread_ids — enough to clear both the count and
+    # the source-diversity promotion gates in one pass.
+    for index, thread_id in enumerate(("t-1", "t-2", "t-3", "t-4"), start=1):
+        postgres_store.append_repo_event(
+            RepoEvent(
+                repo="repo",
+                event_id=f"watchout:{index}",
+                kind=RepoEventKind.WATCHOUT,
+                summary="Always run repo-memory-migrate before the dreaming daemon starts.",
+                observed_seq=index,
+                metadata={"thread_id": thread_id},
+            )
         )
-    )
-    postgres_store.append_repo_event(
-        RepoEvent(
-            repo="repo",
-            event_id="decision:2",
-            kind=RepoEventKind.DECISION,
-            summary="Shared normalization helpers are preferred.",
-            observed_seq=2,
-            path="agent/feature.py",
-        )
-    )
     monkeypatch.setenv("REPO_MEMORY_BACKEND", "postgres")
     monkeypatch.setenv("REPO_MEMORY_DATABASE_URL", postgres_url)
     monkeypatch.setenv("REPO_MEMORY_EMBEDDING_PROVIDER", "hashed")
@@ -587,8 +601,8 @@ def test_postgres_dreaming_daemon_main_processes_repo_via_real_entrypoint(
     runs = reloaded.list_dream_runs("repo")
 
     assert len(claims) == 1
-    assert claims[0].metadata["merged_source_identities"] == ["decision:2"]
+    assert claims[0].status == ClaimStatus.PROMOTED
     assert snapshot is not None
-    assert snapshot.source_watermark == 2
+    assert snapshot.source_watermark == 4
     assert runs[-1].status == "succeeded"
     assert runs[-1].run_kind == "daemon"
