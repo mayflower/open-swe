@@ -1,6 +1,7 @@
 from .commit_and_open_pr import commit_and_open_pr
 from .fetch_url import fetch_url
 from .get_branch_name import get_branch_name
+from .get_pr_review_comments import get_pr_review_comments
 from .github_comment import github_comment
 from .github_review import (
     create_pr_review,
@@ -31,6 +32,7 @@ __all__ = [
     "fetch_url",
     "get_branch_name",
     "get_pr_review",
+    "get_pr_review_comments",
     "github_comment",
     "http_request",
     "linear_comment",
