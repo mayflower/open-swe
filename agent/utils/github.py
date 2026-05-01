@@ -112,11 +112,7 @@ def git_push(
     repo_dir: str,
     branch: str,
 ) -> ExecuteResponse:
-    """Push the branch to origin.
-
-    Authentication is handled by the sandbox proxy (configured at sandbox creation
-    time via the LangSmith proxy-config API), so no token is needed here.
-    """
+    """Push the branch to origin using the sandbox's configured GitHub auth."""
     safe_branch = shlex.quote(branch)
     return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
 

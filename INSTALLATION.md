@@ -1,7 +1,7 @@
 
 # Installation Guide
 
-This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, and production deployment.
+This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, sandbox provider selection, webhooks, and production deployment.
 
 > **The steps are ordered to avoid forward references.** Each step only depends on things you've already completed.
 
@@ -20,6 +20,75 @@ cd open-swe
 uv venv
 source .venv/bin/activate
 uv sync --all-extras
+```
+
+### Optional: use `agent_sandbox` instead of LangSmith sandboxes
+
+If you want Open SWE to use the `agent_sandbox` provider, set:
+
+```bash
+export SANDBOX_TYPE="agent_sandbox"
+export AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+export AGENT_SANDBOX_NAMESPACE="open-swe"
+```
+
+Optional knobs:
+
+```bash
+export AGENT_SANDBOX_ROOT_DIR="/app"
+export AGENT_SANDBOX_CONNECTION_MODE="tunnel"   # tunnel | gateway | direct
+export AGENT_SANDBOX_READY_TIMEOUT="180"
+export AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+export AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+export AGENT_SANDBOX_GATEWAY_NAME="sandbox-gateway"
+export AGENT_SANDBOX_GATEWAY_NAMESPACE="sandbox-system"
+export AGENT_SANDBOX_API_URL="https://agent-sandbox.example.internal"
+```
+
+Open SWE still owns sandbox lifecycle in this mode. It creates or reconnects raw sandboxes and then wraps them with `AgentSandboxBackend.from_existing(...)`; it intentionally does not hand lifecycle over to an upstream adapter factory or managed `from_template()` flow.
+
+Ready-to-paste examples:
+
+`tunnel`
+
+```bash
+export SANDBOX_TYPE="agent_sandbox"
+export AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+export AGENT_SANDBOX_NAMESPACE="open-swe"
+export AGENT_SANDBOX_CONNECTION_MODE="tunnel"
+export AGENT_SANDBOX_ROOT_DIR="/app"
+export AGENT_SANDBOX_READY_TIMEOUT="180"
+export AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+export AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+```
+
+`gateway`
+
+```bash
+export SANDBOX_TYPE="agent_sandbox"
+export AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+export AGENT_SANDBOX_NAMESPACE="open-swe"
+export AGENT_SANDBOX_CONNECTION_MODE="gateway"
+export AGENT_SANDBOX_GATEWAY_NAME="sandbox-gateway"
+export AGENT_SANDBOX_GATEWAY_NAMESPACE="sandbox-system"
+export AGENT_SANDBOX_ROOT_DIR="/app"
+export AGENT_SANDBOX_READY_TIMEOUT="180"
+export AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+export AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
+```
+
+`direct`
+
+```bash
+export SANDBOX_TYPE="agent_sandbox"
+export AGENT_SANDBOX_TEMPLATE_NAME="open-swe"
+export AGENT_SANDBOX_NAMESPACE="open-swe"
+export AGENT_SANDBOX_CONNECTION_MODE="direct"
+export AGENT_SANDBOX_API_URL="https://agent-sandbox.example.internal"
+export AGENT_SANDBOX_ROOT_DIR="/app"
+export AGENT_SANDBOX_READY_TIMEOUT="180"
+export AGENT_SANDBOX_SHUTDOWN_AFTER_SECONDS="900"
+export AGENT_SANDBOX_DEFAULT_TIMEOUT_SECONDS="300"
 ```
 
 ## 2. Start ngrok
@@ -106,6 +175,8 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
+If you set `SANDBOX_TYPE=agent_sandbox`, LangSmith remains the tracing layer while sandbox execution moves to the `agent_sandbox` provider.
+
 ### 4a. Get your API key, project and tenant IDs
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
@@ -160,6 +231,8 @@ DEFAULT_SANDBOX_MEM_BYTES="16106127360"
 ```
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
+
+When `SANDBOX_TYPE=agent_sandbox`, GitHub network access is refreshed inside the sandbox with short-lived GitHub App installation tokens before `git fetch` and `git push`. Plan your outbound network policy accordingly.
 
 ## 5. Set up triggers
 
