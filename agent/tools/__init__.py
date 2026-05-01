@@ -28,6 +28,9 @@ linear_get_issue_comments = _optional_attr(
 )
 linear_list_teams = _optional_attr(".linear_list_teams", "linear_list_teams")
 linear_update_issue = _optional_attr(".linear_update_issue", "linear_update_issue")
+jira_comment = _optional_attr(".jira_comment", "jira_comment")
+jira_get_issue = _optional_attr(".jira_get_issue", "jira_get_issue")
+jira_get_issue_comments = _optional_attr(".jira_get_issue_comments", "jira_get_issue_comments")
 list_repos = _optional_attr(".list_repos", "list_repos")
 remember_repo_decision = _optional_attr(".remember_repo_decision", "remember_repo_decision")
 search_similar_code = _optional_attr(".search_similar_code", "search_similar_code")
@@ -56,6 +59,9 @@ __all__ = [
     "get_pr_review_comments",
     "github_comment",
     "http_request",
+    "jira_comment",
+    "jira_get_issue",
+    "jira_get_issue_comments",
     "linear_comment",
     "list_pr_review_comments",
     "list_pr_reviews",

@@ -24,7 +24,7 @@
 
 Elite engineering orgs like Stripe, Ramp, and Coinbase are building their own internal coding agents — Slackbots, CLIs, and web apps that meet engineers where they already work. These agents are connected to internal systems with the right context, permissioning, and safety boundaries to operate with minimal human oversight.
 
-Open SWE is the open-source version of this pattern. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [Deep Agents](https://github.com/langchain-ai/deepagents), it gives you the same architecture those companies built internally: cloud sandboxes, Slack and Linear invocation, subagent orchestration, and automatic PR creation — ready to customize for your own codebase and workflows.
+Open SWE is the open-source version of this pattern. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [Deep Agents](https://github.com/langchain-ai/deepagents), it gives you the same architecture those companies built internally: cloud sandboxes, Slack, Linear, Jira, and GitHub invocation, subagent orchestration, and automatic PR creation — ready to customize for your own codebase and workflows.
 
 > [!NOTE]
 > 💬 Read the **announcement blog post [here](https://blog.langchain.com/open-swe-an-open-source-framework-for-internal-coding-agents/)**
@@ -72,6 +72,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `http_request` | API calls (GET, POST, etc.) |
 | `commit_and_open_pr` | Git commit + open a GitHub draft PR |
 | `linear_comment` | Post updates to Linear tickets |
+| `jira_comment` | Post updates to Jira Cloud issues |
 | `slack_thread_reply` | Reply in Slack threads |
 
 Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
@@ -81,7 +82,7 @@ Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls
 Open SWE gathers context from two sources:
 
 - **`AGENTS.md`** — If the repo contains an `AGENTS.md` file at the root, it's read from the sandbox and injected into the system prompt. This is your repo-level equivalent of Stripe's rule files: encoding conventions, testing requirements, and architectural decisions that every agent run should follow.
-- **Source context** — The full Linear issue (title, description, comments) or Slack thread history is assembled and passed to the agent, so it starts with rich context rather than discovering everything through tool calls.
+- **Source context** — The full Linear issue, Jira issue, GitHub issue, or Slack thread history is assembled and passed to the agent, so it starts with rich context rather than discovering everything through tool calls.
 
 ### 5. Orchestration — Subagents + Middleware
 
@@ -91,16 +92,17 @@ Open SWE's orchestration has two layers:
 
 **Middleware:** Deterministic middleware hooks run around the agent loop:
 
-- **`check_message_queue_before_model`** — Injects follow-up messages (Linear comments or Slack messages that arrive mid-run) before the next model call. You can message the agent while it's working and it'll pick up your input at its next step.
+- **`check_message_queue_before_model`** — Injects follow-up messages (for example Linear comments or Slack messages that arrive mid-run) before the next model call. You can message the agent while it's working and it'll pick up your input at its next step.
 - **`open_pr_if_needed`** — After-agent safety net that commits and opens a PR if the agent didn't do it itself. This is a lightweight version of Stripe's deterministic nodes — ensuring critical steps happen regardless of LLM behavior.
 - **`ToolErrorMiddleware`** — Catches and handles tool errors gracefully.
 
-### 6. Invocation — Slack, Linear, and GitHub
+### 6. Invocation — Slack, Linear, Jira, and GitHub
 
 All three companies in the article converge on **Slack as the primary invocation surface**. Open SWE does the same:
 
 - **Slack** — Mention the bot in any thread. Supports `repo:owner/name` syntax to specify which repo to work on. The agent replies in-thread with status updates and PR links.
 - **Linear** — Comment `@openswe` on any issue. The agent reads the full issue context, reacts with 👀 to acknowledge, and posts results back as comments.
+- **Jira Cloud** — Comment `@openswe` on any issue. The agent reads the issue plus recent comments, supports explicit `repo:owner/name` overrides in the triggering comment, and posts results back to the Jira ticket. Current support is Jira Cloud only, with text-first ADF handling rather than full media parity.
 - **GitHub** — Tag `@openswe` in PR comments on agent-created PRs to have it address review feedback and push fixes to the same branch.
 
 Each invocation creates a deterministic thread ID, so follow-up messages on the same issue or thread route to the same running agent.
@@ -122,14 +124,14 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 | **Tools** | ~15, curated | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
-| **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
+| **Invocation** | Slack, Linear, Jira, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
 | **Validation** | Prompt-driven + PR safety net | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
 
 ---
 
 ## Features
 
-- **Trigger from Linear, Slack, or GitHub** — mention `@openswe` in a comment to kick off a task
+- **Trigger from Linear, Jira, Slack, or GitHub** — mention `@openswe` in a comment to kick off a task
 - **Instant acknowledgement** — reacts with 👀 the moment it picks up your message
 - **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
 - **Run multiple tasks in parallel** — each task runs in its own isolated cloud sandbox
@@ -141,7 +143,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ## Getting Started
 
-- **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
+- **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Jira/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 - **[Repository Memory](agent/repo_memory/README.md)** — install, usage, configuration, and testing notes for the repo-memory layer in this fork
 

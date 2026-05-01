@@ -29,6 +29,7 @@ def check_if_model_messaged_user(messages: list[AnyMessage]) -> bool:
             "slack_thread_reply",
             "linear_comment",
             "github_comment",
+            "jira_comment",
         ]:
             return True
     return False

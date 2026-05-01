@@ -236,7 +236,7 @@ When `SANDBOX_TYPE=agent_sandbox`, GitHub network access is refreshed inside the
 
 ## 5. Set up triggers
 
-Open SWE can be triggered from GitHub, Linear, and/or Slack. **Configure whichever surfaces your team uses — you don't need all of them.**
+Open SWE can be triggered from GitHub, Linear, Jira Cloud, and/or Slack. **Configure whichever surfaces your team uses — you don't need all of them.**
 
 ### GitHub
 
@@ -298,6 +298,51 @@ LINEAR_TEAM_TO_REPO = {
 ```
 
 Users can also override the team/project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in their `@openswe` comment. The mapping is used as a fallback when no repo is specified in the comment text.
+
+### Jira Cloud (optional)
+
+Open SWE listens for Jira Cloud comments that mention `@openswe`.
+
+Current scope:
+
+- Jira Cloud only
+- Comment-created invocation only
+- Text-first Atlassian Document Format (ADF) support for descriptions and comments
+- Explicit `repo:owner/name` override in the triggering comment
+
+**Create a webhook:**
+
+1. In Jira Cloud, go to **Settings → System → Webhooks → Create a webhook**
+2. Fill in:
+   - **Name**: `open-swe`
+   - **URL**: `https://<your-ngrok-url>/webhooks/jira` — use the ngrok URL from step 2
+   - **Secret**: generate with `openssl rand -hex 32` — save this as `JIRA_WEBHOOK_SECRET`
+3. Subscribe the webhook to issue comment creation events
+4. Save the webhook
+
+**Create an API token:**
+
+1. Generate an Atlassian API token for the account Open SWE should use to read and comment on issues
+2. Save the Jira site URL as `JIRA_BASE_URL` (for example `https://example.atlassian.net`)
+3. Save the account email as `JIRA_API_EMAIL`
+4. Save the token as `JIRA_API_TOKEN`
+
+**Optional bot-account filtering:**
+
+If Jira comments posted by Open SWE appear as a dedicated bot account, set `JIRA_BOT_ACCOUNT_ID` to that account's `accountId` so the webhook ignores the bot's own follow-up comments.
+
+**Configure project-to-repo mapping:**
+
+Open SWE routes Jira issues to GitHub repos based on the issue's Jira project key. Edit the mapping in `agent/utils/jira_project_repo_map.py`:
+
+```python
+JIRA_PROJECT_TO_REPO = {
+    "OPS": {"owner": "my-org", "name": "platform"},
+    "WEB": {"owner": "my-org", "name": "frontend"},
+}
+```
+
+Users can also override the project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in the triggering Jira comment. The explicit repo in the comment wins; the project mapping is the fallback.
 
 ### Slack (optional)
 
@@ -430,6 +475,13 @@ DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
 LINEAR_API_KEY=""                      # From step 5
 LINEAR_WEBHOOK_SECRET=""               # From step 5
 
+# === Jira Cloud (if using Jira trigger) ===
+JIRA_BASE_URL=""                       # e.g. "https://example.atlassian.net"
+JIRA_API_EMAIL=""                      # Atlassian account email
+JIRA_API_TOKEN=""                      # Atlassian API token
+JIRA_WEBHOOK_SECRET=""                 # From step 5
+JIRA_BOT_ACCOUNT_ID=""                 # Optional: ignore this Jira account's comments
+
 # === Slack (if using Slack trigger) ===
 SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
@@ -462,6 +514,8 @@ The server runs on `http://localhost:2024` with these endpoints:
 | Endpoint | Purpose |
 |---|---|
 | `POST /webhooks/github` | GitHub issue/PR/comment webhooks |
+| `POST /webhooks/jira` | Jira Cloud comment webhooks |
+| `GET /webhooks/jira` | Jira webhook verification |
 | `POST /webhooks/linear` | Linear comment webhooks |
 | `GET /webhooks/linear` | Linear webhook verification |
 | `POST /webhooks/slack` | Slack event webhooks |
@@ -488,6 +542,15 @@ The server runs on `http://localhost:2024` with these endpoints:
    - A new run in your LangSmith project
    - The agent replies with a comment on the issue
 
+### Jira Cloud
+
+1. Go to any Jira issue in a project you configured in `JIRA_PROJECT_TO_REPO`
+2. Add a comment: `@openswe what files are in this repo?`
+3. Optionally force a repo with `@openswe repo:my-org/my-repo what files are in this repo?`
+4. You should see:
+   - A new run in your LangSmith project
+   - The agent replies with a comment on the issue
+
 ### Slack
 
 1. In any channel where the bot is invited, start a thread
@@ -503,7 +566,7 @@ For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.githu
 1. Push your code to a GitHub repository
 2. Connect the repo to LangGraph Cloud
 3. Set all environment variables from step 6 in the deployment config
-4. Update your webhook URLs (Linear, Slack, GitHub App) to point to your production URL (replace the ngrok URL)
+4. Update your webhook URLs (Linear, Jira, Slack, GitHub App) to point to your production URL (replace the ngrok URL)
 
 The `langgraph.json` at the project root already defines the graph entry point and HTTP app:
 
@@ -522,10 +585,10 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 ### Webhook not receiving events
 
-- Verify ngrok is running and the URL matches what's configured in GitHub/Linear/Slack
+- Verify ngrok is running and the URL matches what's configured in GitHub/Linear/Jira/Slack
 - Check the ngrok web inspector at `http://localhost:4040` for incoming requests
-- Ensure you enabled the correct event types (Comments → Create for Linear, `app_mention` for Slack, Issues + Issue comment for GitHub)
-- **Webhook secrets are required** — if `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or `SLACK_SIGNING_SECRET` is not set, all requests to that endpoint will be rejected with 401
+- Ensure you enabled the correct event types (Comments → Create for Linear, Jira comment-created events for Jira Cloud, `app_mention` for Slack, Issues + Issue comment for GitHub)
+- **Webhook secrets are required** — if `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, `JIRA_WEBHOOK_SECRET`, or `SLACK_SIGNING_SECRET` is not set, all requests to that endpoint will be rejected with 401
 
 ### GitHub authentication errors
 
@@ -545,6 +608,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter's GitHub username is in `GITHUB_USER_EMAIL_MAP`
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
+- For Jira Cloud: ensure the comment contains `@openswe` and that the Jira project is mapped, or include `repo:owner/name` in the triggering comment
 - For Slack: ensure the bot is invited to the channel and the message is an `@mention`
 - Check server logs for webhook processing errors
 

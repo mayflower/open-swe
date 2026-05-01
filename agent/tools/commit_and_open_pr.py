@@ -62,8 +62,8 @@ def commit_and_open_pr(
     - chore: for maintenance tasks (deps, configs, cleanup)
     - ci:    for CI/CD changes
 
-    The [closes ...] suffix links and auto-closes the Linear ticket.
-    Use the linear_project_id and linear_issue_number from your context.
+    The [closes ...] suffix links the PR back to the originating tracker issue.
+    Use the issue reference from your context, such as a Linear key or Jira key.
 
     Examples:
     - "fix: resolve null pointer in user auth [closes AA-123]"

@@ -37,6 +37,9 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.jira import get_jira_issue, post_jira_trace_comment
+from .utils.jira_adf import adf_to_text
+from .utils.jira_project_repo_map import JIRA_PROJECT_TO_REPO
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -67,6 +70,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(lifespan=lifespan)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
+JIRA_WEBHOOK_SECRET = os.environ.get("JIRA_WEBHOOK_SECRET", "")
+JIRA_BOT_ACCOUNT_ID = os.environ.get("JIRA_BOT_ACCOUNT_ID", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
@@ -123,6 +128,24 @@ def get_repo_config_from_team_mapping(
         project_config = config["projects"].get(project_name)
         if project_config:
             return project_config
+
+    if "default" in config:
+        return config["default"]
+
+    return fallback
+
+
+def get_repo_config_from_jira_project_mapping(project_key: str) -> dict[str, str]:
+    """Look up repository configuration from JIRA_PROJECT_TO_REPO mapping."""
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
+
+    if not project_key or project_key not in JIRA_PROJECT_TO_REPO:
+        return fallback
+
+    config = JIRA_PROJECT_TO_REPO[project_key]
+
+    if "owner" in config and "name" in config:
+        return config
 
     if "default" in config:
         return config["default"]
@@ -266,11 +289,27 @@ def generate_thread_id_from_github_issue(issue_id: str) -> str:
     )
 
 
+def generate_thread_id_from_jira_issue(site: str, issue_id: str) -> str:
+    """Generate a deterministic thread ID from a Jira site and issue ID."""
+    hash_bytes = hashlib.sha256(f"jira-issue:{site}:{issue_id}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
 def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
     """Generate a deterministic thread ID from a Slack thread identifier."""
     composite = f"{channel_id}:{thread_id}"
     md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
     return str(uuid.UUID(hex=md5_hex))
+
+
+def normalize_jira_comment_body(body: Any) -> str:
+    """Normalize a Jira comment body to readable text."""
+    if isinstance(body, str):
+        return body
+    return adf_to_text(body)
 
 
 def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
@@ -297,6 +336,132 @@ def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] |
 def _is_not_found_error(exc: Exception) -> bool:
     """Best-effort check for LangGraph 404 errors."""
     return getattr(exc, "status_code", None) == 404
+
+
+def _jira_issue_url(site: str, issue_key: str, fallback_url: str = "") -> str:
+    if fallback_url:
+        return fallback_url
+    if not site or not issue_key:
+        return ""
+    base = site if site.startswith("http://") or site.startswith("https://") else f"https://{site}"
+    return f"{base.rstrip('/')}/browse/{issue_key}"
+
+
+def normalize_jira_comments_for_recent_comments(
+    comments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": comment.get("id", ""),
+            "body": normalize_jira_comment_body(comment.get("body")),
+            "createdAt": comment.get("created", ""),
+            "user": {"name": comment.get("author", {}).get("displayName", "User")},
+        }
+        for comment in comments
+    ]
+
+
+def build_jira_prompt_text(
+    issue_id: str,
+    issue_key: str,
+    title: str,
+    description: str,
+    comments: list[dict[str, Any]],
+    *,
+    triggering_user_name: str = "",
+) -> str:
+    triggered_by_line = f"## Triggered by: {triggering_user_name}\n\n" if triggering_user_name else ""
+    comments_text = ""
+    if comments:
+        comments_text = "\n\n## Comments:\n"
+        for comment in comments:
+            author = comment.get("user", {}).get("name", "User")
+            body = comment.get("body", "")
+            comments_text += f"\n**{author}:** {body}\n"
+
+    return (
+        "Please work on the following issue:\n\n"
+        f"## Title: {title}\n\n"
+        f"{triggered_by_line}"
+        f"## Jira Ticket: {issue_key} - Ticket ID: {issue_id}\n\n"
+        f"## Description:\n{description}\n"
+        f"{comments_text}\n\n"
+        "Please analyze this issue and implement the necessary changes."
+    )
+
+
+def build_jira_run_configurable(
+    repo_config: dict[str, str],
+    issue_id: str,
+    issue_key: str,
+    title: str,
+    issue_url: str,
+    user_name: str,
+    user_email: str | None,
+    project_key: str,
+) -> dict[str, Any]:
+    return {
+        "repo": repo_config,
+        "user_email": user_email,
+        "source": "jira",
+        "tracker": {
+            "source": "jira",
+            "issue_id": issue_id,
+            "issue_ref": issue_key,
+            "issue_title": title,
+            "issue_url": issue_url,
+            "reply_tool_name": "jira_comment",
+            "triggering_user_name": user_name,
+        },
+        "jira_issue": {
+            "id": issue_id,
+            "key": issue_key,
+            "url": issue_url,
+            "project_key": project_key,
+            "triggering_user_name": user_name,
+        },
+    }
+
+
+def build_linear_run_configurable(
+    repo_config: dict[str, str],
+    issue_id: str,
+    title: str,
+    issue_url: str,
+    identifier: str,
+    user_name: str,
+    user_email: str | None,
+) -> dict[str, Any]:
+    linear_project_id = ""
+    linear_issue_number = ""
+    if identifier and "-" in identifier:
+        parts = identifier.split("-", 1)
+        linear_project_id = parts[0]
+        linear_issue_number = parts[1]
+
+    return {
+        "repo": repo_config,
+        "linear_issue": {
+            "id": issue_id,
+            "title": title,
+            "url": issue_url,
+            "identifier": identifier,
+            "linear_project_id": linear_project_id,
+            "linear_issue_number": linear_issue_number,
+            "triggering_user_name": user_name or "",
+        },
+        "tracker": {
+            "source": "linear",
+            "issue_id": issue_id,
+            "issue_ref": identifier,
+            "issue_title": title,
+            "issue_url": issue_url,
+            "reply_tool_name": "linear_comment",
+            "triggering_user_name": user_name or "",
+        },
+        "user_email": user_email,
+        "source": "linear",
+    }
 
 
 def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
@@ -618,27 +783,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                     content_blocks.append(image_block)
         logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
-    linear_project_id = ""
-    linear_issue_number = ""
-    if identifier and "-" in identifier:
-        parts = identifier.split("-", 1)
-        linear_project_id = parts[0]
-        linear_issue_number = parts[1]
-
-    configurable: dict[str, Any] = {
-        "repo": repo_config,
-        "linear_issue": {
-            "id": issue_id,
-            "title": title,
-            "url": full_issue.get("url", "") or issue_data.get("url", ""),
-            "identifier": identifier,
-            "linear_project_id": linear_project_id,
-            "linear_issue_number": linear_issue_number,
-            "triggering_user_name": user_name or "",
-        },
-        "user_email": user_email,
-        "source": "linear",
-    }
+    configurable = build_linear_run_configurable(
+        repo_config,
+        issue_id,
+        title,
+        full_issue.get("url", "") or issue_data.get("url", ""),
+        identifier,
+        user_name or "",
+        user_email,
+    )
 
     logger.info("Checking if thread %s is active before creating run", thread_id)
     thread_active = await is_thread_active(thread_id)
@@ -676,6 +829,117 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
         await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
+
+
+async def process_jira_issue(issue_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+    """Process a Jira issue by creating or continuing a LangGraph thread."""
+    issue_id = str(issue_data.get("id", ""))
+    issue_key = issue_data.get("key", "")
+    site = issue_data.get("site", "")
+
+    if not issue_id or not issue_key or not site:
+        logger.warning("Missing Jira issue id/key/site, skipping")
+        return
+
+    result = await get_jira_issue(issue_key)
+    full_issue = result.get("issue") if isinstance(result, dict) else None
+    if not isinstance(full_issue, dict):
+        full_issue = issue_data
+
+    fields = full_issue.get("fields", {})
+    summary = fields.get("summary", "No title")
+    description = normalize_jira_comment_body(fields.get("description")) or "No description"
+    issue_url = _jira_issue_url(site, issue_key, issue_data.get("url", ""))
+
+    thread_id = generate_thread_id_from_jira_issue(site, issue_id)
+
+    reporter = fields.get("reporter", {})
+    assignee = fields.get("assignee", {})
+    trigger_author = issue_data.get("comment_author", {})
+    user_name = (
+        trigger_author.get("displayName")
+        or reporter.get("displayName")
+        or assignee.get("displayName")
+        or ""
+    )
+    user_email = (
+        reporter.get("emailAddress")
+        or assignee.get("emailAddress")
+        or trigger_author.get("emailAddress")
+        or issue_data.get("comment_author_email")
+        or None
+    )
+
+    raw_comments = fields.get("comment", {}).get("comments", [])
+    normalized_comments = normalize_jira_comments_for_recent_comments(raw_comments)
+    triggering_comment_id = issue_data.get("triggering_comment_id", "")
+
+    relevant_comments = []
+    if triggering_comment_id:
+        comment_id_to_index = {
+            comment.get("id", ""): index for index, comment in enumerate(normalized_comments)
+        }
+        trigger_index = comment_id_to_index.get(triggering_comment_id)
+        if trigger_index is not None:
+            relevant_comments = normalized_comments[trigger_index:]
+    if not relevant_comments:
+        relevant_comments = get_recent_comments(normalized_comments, ("On it!",)) or []
+
+    triggering_comment = issue_data.get("triggering_comment", {})
+    if (
+        isinstance(triggering_comment, dict)
+        and triggering_comment_id
+        and not any(comment.get("id") == triggering_comment_id for comment in relevant_comments)
+    ):
+        relevant_comments.append(
+            {
+                "id": triggering_comment_id,
+                "body": normalize_jira_comment_body(triggering_comment.get("body")),
+                "createdAt": triggering_comment.get("created", ""),
+                "user": {
+                    "name": triggering_comment.get("author", {}).get("displayName", user_name or "User")
+                },
+            }
+        )
+
+    prompt = build_jira_prompt_text(
+        issue_id,
+        issue_key,
+        summary,
+        description,
+        relevant_comments,
+        triggering_user_name=user_name,
+    )
+    project_key = fields.get("project", {}).get("key", issue_key.split("-", 1)[0] if "-" in issue_key else "")
+    configurable = build_jira_run_configurable(
+        repo_config,
+        issue_id,
+        issue_key,
+        summary,
+        issue_url,
+        user_name,
+        user_email,
+        project_key,
+    )
+
+    thread_active = await is_thread_active(thread_id)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if thread_active:
+        queued = await queue_message_for_thread(thread_id, prompt)
+        if queued:
+            runs = await langgraph_client.runs.list(thread_id, limit=1)
+            if runs:
+                await post_jira_trace_comment(issue_key, runs[0]["run_id"])
+        return
+
+    run = await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    await post_jira_trace_comment(issue_key, run["run_id"])
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -857,6 +1121,112 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
     return hmac.compare_digest(expected, signature)
+
+
+def verify_jira_signature(body: bytes, signature: str, secret: str) -> bool:
+    """Verify the Jira webhook signature."""
+    if not secret:
+        logger.warning("JIRA_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    normalized_signature = (
+        signature.removeprefix("sha256=") if isinstance(signature, str) else ""
+    )
+
+    return hmac.compare_digest(expected, normalized_signature)
+
+
+@app.post("/webhooks/jira")
+async def jira_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Handle Jira comment-created webhooks that mention @openswe."""
+    logger.info("Received Jira webhook")
+    body = await request.body()
+
+    signature = request.headers.get("X-Hub-Signature-256") or request.headers.get(
+        "X-Hub-Signature", ""
+    )
+    if not verify_jira_signature(body, signature, JIRA_WEBHOOK_SECRET):
+        logger.warning("Invalid Jira webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid Jira webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse Jira webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    if payload.get("webhookEvent") != "comment_created":
+        logger.debug("Ignoring Jira webhook: not a comment_created event")
+        return {"status": "ignored", "reason": "Not a comment_created event"}
+
+    issue = payload.get("issue", {})
+    if not issue:
+        logger.debug("Ignoring Jira webhook: missing issue data")
+        return {"status": "ignored", "reason": "Missing issue data"}
+
+    comment = payload.get("comment", {})
+    comment_body = normalize_jira_comment_body(comment.get("body"))
+    if "@openswe" not in comment_body.lower():
+        logger.debug("Ignoring Jira webhook: comment does not mention @openswe")
+        return {"status": "ignored", "reason": "Comment does not mention @openswe"}
+
+    author = comment.get("author", {})
+    author_account_id = author.get("accountId", "")
+    if JIRA_BOT_ACCOUNT_ID and author_account_id == JIRA_BOT_ACCOUNT_ID:
+        logger.debug("Ignoring Jira webhook: comment is from configured bot account")
+        return {"status": "ignored", "reason": "Comment is from configured bot account"}
+
+    project_key = issue.get("fields", {}).get("project", {}).get("key", "")
+    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
+    if not repo_config:
+        repo_config = get_repo_config_from_jira_project_mapping(project_key)
+
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Jira webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
+    issue_payload = dict(issue)
+    issue_payload["site"] = payload.get("baseUrl", "")
+    issue_payload["triggering_comment_id"] = comment.get("id", "")
+    issue_payload["triggering_comment"] = {
+        "id": comment.get("id", ""),
+        "body": comment.get("body"),
+        "text": comment_body,
+        "created": comment.get("created", ""),
+        "author": author,
+    }
+    issue_payload["comment_author"] = author
+    issue_payload["comment_author_email"] = author.get("emailAddress")
+    issue_payload.setdefault("fields", {})
+    if not issue_payload["fields"].get("summary") and issue.get("fields", {}).get("summary"):
+        issue_payload["fields"]["summary"] = issue["fields"]["summary"]
+    if project_key and not issue_payload["fields"].get("project"):
+        issue_payload["fields"]["project"] = {"key": project_key}
+
+    logger.info(
+        "Accepted Jira webhook for issue '%s' (%s), scheduling background task",
+        issue.get("fields", {}).get("summary", "No title"),
+        issue.get("key", ""),
+    )
+    background_tasks.add_task(process_jira_issue, issue_payload, repo_config)
+
+    return {
+        "status": "accepted",
+        "message": (
+            f"Processing issue '{issue.get('fields', {}).get('summary', 'No title')}' "
+            f"for repo {repo_config['owner']}/{repo_config['name']}"
+        ),
+    }
+
+
+@app.get("/webhooks/jira")
+async def jira_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for Jira webhook setup."""
+    return {"status": "ok", "message": "Jira webhook endpoint is active"}
 
 
 @app.post("/webhooks/linear")
