@@ -37,11 +37,11 @@ def test_flush_parses_supported_languages_in_live_sync_path() -> None:
         focus_paths=[],
     )
 
-    assert store.get_entity("agent/widget.py:Widget") is not None
-    assert store.get_entity("agent/widget.py:Widget.render") is not None
-    assert store.get_entity("agent/widget.ts:WidgetService") is not None
-    assert store.get_entity("agent/widget.go:WidgetService.Render") is not None
-    assert store.get_entity("agent/widget.rs:helper") is not None
+    assert store.get_entity("repo|agent/widget.py:Widget") is not None
+    assert store.get_entity("repo|agent/widget.py:Widget.render") is not None
+    assert store.get_entity("repo|agent/widget.ts:WidgetService") is not None
+    assert store.get_entity("repo|agent/widget.go:WidgetService.Render") is not None
+    assert store.get_entity("repo|agent/widget.rs:helper") is not None
 
 
 def test_flush_routes_all_four_languages_through_tree_sitter_dispatch() -> None:
@@ -73,14 +73,14 @@ def test_flush_routes_all_four_languages_through_tree_sitter_dispatch() -> None:
         focus_paths=[],
     )
 
-    assert store.get_entity("agent/alpha.py:Alpha") is not None
-    assert store.get_entity("agent/alpha.py:Alpha.send") is not None
-    assert store.get_entity("agent/beta.ts:Beta") is not None
-    assert store.get_entity("agent/beta.ts:BetaClient.send") is not None
-    assert store.get_entity("agent/gamma.go:GammaClient") is not None
-    assert store.get_entity("agent/gamma.go:GammaClient.Send") is not None
-    assert store.get_entity("agent/delta.rs:DeltaSender") is not None
-    assert store.get_entity("agent/delta.rs:DeltaClient.send") is not None
+    assert store.get_entity("repo|agent/alpha.py:Alpha") is not None
+    assert store.get_entity("repo|agent/alpha.py:Alpha.send") is not None
+    assert store.get_entity("repo|agent/beta.ts:Beta") is not None
+    assert store.get_entity("repo|agent/beta.ts:BetaClient.send") is not None
+    assert store.get_entity("repo|agent/gamma.go:GammaClient") is not None
+    assert store.get_entity("repo|agent/gamma.go:GammaClient.Send") is not None
+    assert store.get_entity("repo|agent/delta.rs:DeltaSender") is not None
+    assert store.get_entity("repo|agent/delta.rs:DeltaClient.send") is not None
 
 
 def test_flush_persists_typescript_go_and_rust_entities_in_postgres(
@@ -100,9 +100,9 @@ def test_flush_persists_typescript_go_and_rust_entities_in_postgres(
 
     assert flushed == ["agent/widget.ts", "agent/widget.go", "agent/widget.rs"]
     assert postgres_store.get_sync_state("repo")["last_compiled_seq"] == 5
-    assert postgres_store.get_entity("agent/widget.ts:WidgetService") is not None
-    assert postgres_store.get_entity("agent/widget.go:WidgetService.Render") is not None
-    assert postgres_store.get_entity("agent/widget.rs:helper") is not None
+    assert postgres_store.get_entity("repo|agent/widget.ts:WidgetService") is not None
+    assert postgres_store.get_entity("repo|agent/widget.go:WidgetService.Render") is not None
+    assert postgres_store.get_entity("repo|agent/widget.rs:helper") is not None
 
 
 def test_flush_unsupported_files_fail_closed_in_postgres(

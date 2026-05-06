@@ -1,3 +1,4 @@
+from ..repo_memory.middleware import RepoMemoryToolMiddleware, inject_repo_memory_before_model
 from .check_message_queue import check_message_queue_before_model
 from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
@@ -8,7 +9,6 @@ from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .tool_error_handler import ToolErrorMiddleware
-from ..repo_memory.middleware import RepoMemoryToolMiddleware, inject_repo_memory_before_model
 
 __all__ = [
     "ExcludeToolsMiddleware",

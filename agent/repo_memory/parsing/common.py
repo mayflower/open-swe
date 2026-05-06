@@ -24,7 +24,7 @@ class ParsedEntity:
 
     def to_revision(self, repo: str, observed_seq: int, retrieval_text: str) -> EntityRevision:
         return EntityRevision(
-            entity_id=self.entity_id,
+            entity_id=scope_entity_id_to_repo(repo, self.entity_id),
             repo=repo,
             path=self.path,
             language=self.language,
@@ -51,6 +51,36 @@ def make_qualified_name(parent: str | None, name: str) -> str:
     return f"{parent}.{name}" if parent else name
 
 
+_REPO_ID_SEPARATOR = "|"
+
+
 def make_entity_id(path: str, qualified_name: str) -> str:
+    """Path-scoped entity id used at parse time.
+
+    Repo scoping is applied later in :func:`scope_entity_id_to_repo` (called
+    from :meth:`ParsedEntity.to_revision`) so parsers stay independent of
+    the repo concept.
+    """
     return f"{path}:{qualified_name}"
 
+
+def scope_entity_id_to_repo(repo: str, entity_id: str) -> str:
+    """Apply the repo prefix to a path-scoped entity id.
+
+    Without this, two repositories that happen to share a
+    ``path:qualified_name`` (e.g., both have ``src/main.py:main``) would
+    collide on ``entities.entity_id PRIMARY KEY`` and one repo would
+    silently overwrite the other's revisions / lineage. Idempotent: an
+    already-scoped id is returned unchanged so callers don't have to check.
+    """
+    if entity_id.startswith(f"{repo}{_REPO_ID_SEPARATOR}"):
+        return entity_id
+    return f"{repo}{_REPO_ID_SEPARATOR}{entity_id}"
+
+
+def unscope_entity_id(repo: str, entity_id: str) -> str:
+    """Strip the repo prefix from a scoped entity id (debugging / display)."""
+    prefix = f"{repo}{_REPO_ID_SEPARATOR}"
+    if entity_id.startswith(prefix):
+        return entity_id[len(prefix) :]
+    return entity_id

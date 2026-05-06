@@ -28,4 +28,3 @@ def compute_focus_set(
     paths = _unique_ordered((explicit_paths or []) + (derived_paths or []))
     entities = _unique_ordered((explicit_entities or []) + (derived_entities or []))
     return FocusSet(paths=paths, entities=entities)
-

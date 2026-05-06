@@ -2,7 +2,6 @@ from pathlib import Path
 
 from agent.repo_memory.parsing.typescript_parser import parse_typescript_entities
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "typescript_sample_module.ts.txt"
 
 

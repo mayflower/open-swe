@@ -54,8 +54,8 @@ from .middleware import (
     inject_repo_memory_before_model,
     notify_step_limit_reached,
 )
-from .repo_memory.runtime import bind_runtime_context, get_or_create_repo_memory_runtime
 from .prompt import construct_system_prompt
+from .repo_memory.runtime import bind_runtime_context, get_or_create_repo_memory_runtime
 from .tools import (
     fetch_url,
     get_entity_history,

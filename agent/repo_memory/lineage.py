@@ -20,4 +20,3 @@ def lineage_from_match(match: MatchDecision) -> LineageRecord:
         reason=match.reason,
         confidence=match.confidence,
     )
-

@@ -134,9 +134,7 @@ def test_deep_phase_is_only_phase_that_writes_snapshot() -> None:
     assert store.get_latest_repo_core_snapshot("repo") is None, (
         "Neither Light nor REM may write a snapshot."
     )
-    deep = run_deep_phase(
-        store, "repo", source_watermark=5, now=now, config=config
-    )
+    deep = run_deep_phase(store, "repo", source_watermark=5, now=now, config=config)
 
     assert deep.scored_claims >= 1
     assert deep.promoted_claims >= 1

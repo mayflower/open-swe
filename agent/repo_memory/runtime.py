@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -7,8 +8,10 @@ from typing import Any
 try:
     from langgraph.config import get_config
 except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+
     def get_config() -> dict[str, Any]:
         raise RuntimeError("langgraph is not available")
+
 
 from .config import RepoMemoryConfig
 from .persistence.repositories import create_repo_memory_store
@@ -28,6 +31,7 @@ class RepoMemoryRuntime:
 
 
 _RUNTIME_REGISTRY: dict[str, RepoMemoryRuntime] = {}
+_RUNTIME_REGISTRY_LOCK = threading.Lock()
 
 
 def get_or_create_repo_memory_runtime(
@@ -35,16 +39,25 @@ def get_or_create_repo_memory_runtime(
     *,
     config: RepoMemoryConfig | None = None,
 ) -> RepoMemoryRuntime:
+    """Return the shared ``RepoMemoryRuntime`` for ``repo`` (creating once).
+
+    Wrapped in a process-wide lock because without it two concurrent agents
+    on the same repo could each pass the cache-miss branch and construct a
+    ``PostgresRepoMemoryStore`` (or in-memory fallback). The second
+    ``_RUNTIME_REGISTRY[repo] = …`` would overwrite the first, leaving any
+    references the loser already handed out pointing at an orphaned store.
+    """
     runtime_config = config or RepoMemoryConfig()
-    runtime = _RUNTIME_REGISTRY.get(repo)
-    if runtime is None:
-        runtime = RepoMemoryRuntime(
-            repo=repo,
-            store=create_repo_memory_store(runtime_config),
-            config=runtime_config,
-        )
-        _RUNTIME_REGISTRY[repo] = runtime
-    else:
+    with _RUNTIME_REGISTRY_LOCK:
+        runtime = _RUNTIME_REGISTRY.get(repo)
+        if runtime is None:
+            runtime = RepoMemoryRuntime(
+                repo=repo,
+                store=create_repo_memory_store(runtime_config),
+                config=runtime_config,
+            )
+            _RUNTIME_REGISTRY[repo] = runtime
+            return runtime
         runtime.config = runtime_config
         desired_backend = runtime_config.resolved_backend()
         current_backend = "postgres" if runtime_attr(runtime.store, "database_url") else "memory"
@@ -54,7 +67,7 @@ def get_or_create_repo_memory_runtime(
             or current_database_url != runtime_config.database_url
         ):
             runtime.store = create_repo_memory_store(runtime_config)
-    return runtime
+        return runtime
 
 
 def get_registered_repo_memory_runtime(repo: str) -> RepoMemoryRuntime | None:

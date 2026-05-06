@@ -40,7 +40,7 @@ from agent.repo_memory.persistence.migrations import validate_repo_memory_schema
 from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
 from agent.repo_memory.persistence.repositories import create_repo_memory_store
 from agent.repo_memory.retrieval.search import search_store_similar_code_results
-from agent.repo_memory.runtime import RepoMemoryRuntime, _RUNTIME_REGISTRY
+from agent.repo_memory.runtime import _RUNTIME_REGISTRY, RepoMemoryRuntime
 from agent.repo_memory.sync import FlushCoordinator
 
 logger = logging.getLogger("repo_memory_probe")
@@ -210,13 +210,9 @@ def _reset_tables(database_url: str) -> None:
 
 def _resolve_config(args: argparse.Namespace) -> tuple[str, RepoMemoryConfig]:
     database_url = (
-        args.database_url
-        or os.getenv("REPO_MEMORY_DATABASE_URL")
-        or DEFAULT_POSTGRES_URL
+        args.database_url or os.getenv("REPO_MEMORY_DATABASE_URL") or DEFAULT_POSTGRES_URL
     )
-    provider = args.embedding_provider or (
-        "openai" if os.getenv("OPENAI_API_KEY") else "hashed"
-    )
+    provider = args.embedding_provider or ("openai" if os.getenv("OPENAI_API_KEY") else "hashed")
     dimensions = args.embedding_dimensions or (1536 if provider == "openai" else 16)
     config = RepoMemoryConfig(
         backend="postgres",
@@ -326,19 +322,12 @@ def _summarize_snapshot(store: object, repo: str) -> dict | None:
         "snapshot_id": snapshot.snapshot_id,
         "source_watermark": snapshot.source_watermark,
         "source_claim_keys": snapshot.source_claim_keys,
-        "blocks": [
-            {"label": block.label, "value": block.value[:280]}
-            for block in snapshot.blocks
-        ],
+        "blocks": [{"label": block.label, "value": block.value[:280]} for block in snapshot.blocks],
     }
 
 
-def _summarize_search(
-    store: object, repo: str, query: str, config: RepoMemoryConfig
-) -> list[dict]:
-    results = search_store_similar_code_results(
-        store, repo, query, config=config, limit=5
-    )
+def _summarize_search(store: object, repo: str, query: str, config: RepoMemoryConfig) -> list[dict]:
+    results = search_store_similar_code_results(store, repo, query, config=config, limit=5)
     return [
         {
             "qualified_name": result.entity.qualified_name,
@@ -362,9 +351,7 @@ def _summarize_explain(runtime: RepoMemoryRuntime) -> list[dict]:
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _parse_args()
     root = args.path.expanduser().resolve()
     if not root.is_dir():
@@ -375,9 +362,7 @@ def main() -> int:
     os.environ.setdefault("REPO_MEMORY_ALLOW_IN_MEMORY", "false")
 
     try:
-        validate_repo_memory_schema(
-            database_url, vector_dimensions=config.embedding_dimensions
-        )
+        validate_repo_memory_schema(database_url, vector_dimensions=config.embedding_dimensions)
     except Exception as exc:
         logger.error(
             "repo-memory schema is not ready at %s: %s. "

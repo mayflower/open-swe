@@ -20,4 +20,3 @@ def score_candidate(
         score += config.same_kind_bonus
     score += min(freshness / 100.0, config.freshness_bonus)
     return score
-

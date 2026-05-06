@@ -115,9 +115,7 @@ async def validate_repo_memory_schema_async(
                 f"expected {expected_version}, found {applied_version!r}. "
                 "Run `uv run repo-memory-migrate`."
             )
-        vector_enabled = await conn.fetchval(
-            "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
-        )
+        vector_enabled = await conn.fetchval("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
         if vector_enabled != 1:
             raise RuntimeError(
                 "Postgres pgvector extension is not installed. "

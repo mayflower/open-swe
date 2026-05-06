@@ -84,7 +84,7 @@ def test_injection_flushes_dirty_paths_before_compiling() -> None:
 
     assert payload is not None
     assert runtime.store.get_file("repo", "agent/feature.py") is not None
-    assert runtime.store.get_entity("agent/feature.py:helper") is not None
+    assert runtime.store.get_entity("repo|agent/feature.py:helper") is not None
     assert state["dirty_paths"] == set()
     assert state["dirty_unknown"] is False
 
@@ -110,7 +110,7 @@ def test_injection_flushes_execute_dirty_unknown_via_git_diff() -> None:
     payload = build_injection_payload(state)
 
     assert payload is not None
-    assert runtime.store.get_entity("agent/feature.py:helper") is not None
+    assert runtime.store.get_entity("repo|agent/feature.py:helper") is not None
     assert state["dirty_unknown"] is False
 
 
@@ -143,9 +143,9 @@ def test_injection_prioritizes_focus_paths_and_bounds_execute_probe_scope() -> N
     payload = build_injection_payload(state)
 
     assert payload is not None
-    assert runtime.store.get_entity("agent/focus.py:focus_helper") is not None
-    assert runtime.store.get_entity("agent/first.py:first_helper") is not None
-    assert runtime.store.get_entity("agent/ignored.py:ignored_helper") is None
+    assert runtime.store.get_entity("repo|agent/focus.py:focus_helper") is not None
+    assert runtime.store.get_entity("repo|agent/first.py:first_helper") is not None
+    assert runtime.store.get_entity("repo|agent/ignored.py:ignored_helper") is None
 
 
 def test_injection_flushes_execute_dirty_unknown_into_postgres_store(
@@ -182,7 +182,7 @@ def test_injection_flushes_execute_dirty_unknown_into_postgres_store(
         embedding_provider=postgres_store.embedding_provider,
     )
     assert payload is not None
-    assert reloaded.get_entity("agent/feature.py:helper") is not None
+    assert reloaded.get_entity("repo|agent/feature.py:helper") is not None
     assert reloaded.get_sync_state("repo")["last_compiled_seq"] == 1
     assert state["dirty_unknown"] is False
 

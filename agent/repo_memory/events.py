@@ -65,4 +65,3 @@ def search_repo_events(
         )
     ranked.sort(key=lambda item: (-item.score, -item.event.observed_seq))
     return ranked[:limit]
-

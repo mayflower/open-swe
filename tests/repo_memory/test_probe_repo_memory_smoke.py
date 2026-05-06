@@ -71,9 +71,7 @@ def test_probe_indexes_multilang_repo_and_seeds_dreaming(tmp_path: Path) -> None
     assert any("gamma.go" in entity_id for entity_id in entity_ids)
     assert any("delta.rs" in entity_id for entity_id in entity_ids)
 
-    seeded = probe_repo_memory._seed_events(
-        store, runtime.repo, flush_summary["last_observed_seq"]
-    )
+    seeded = probe_repo_memory._seed_events(store, runtime.repo, flush_summary["last_observed_seq"])
     assert seeded == len(probe_repo_memory._SEED_EVENTS)
 
     runs = probe_repo_memory._run_dreaming(runtime)

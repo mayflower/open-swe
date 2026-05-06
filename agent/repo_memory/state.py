@@ -5,6 +5,7 @@ from typing import Any
 try:
     from langchain.agents.middleware import AgentState
 except ModuleNotFoundError:  # pragma: no cover - exercised in stripped test envs
+
     class AgentState(dict):
         pass
 

@@ -3,7 +3,6 @@ from pathlib import Path
 from agent.repo_memory.parsing.python_parser import parse_python_entities
 from agent.repo_memory.parsing.retrieval_text import build_retrieval_text
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "python_sample_module.py.txt"
 
 

@@ -4,6 +4,7 @@ import argparse
 import logging
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -94,21 +95,78 @@ def run_repo_memory_dreaming_cycle(
     now: datetime | None = None,
     worker_prefix: str = "dreaming-daemon",
 ) -> list[DreamRun]:
-    runs: list[DreamRun] = []
+    """Drive one dreaming cycle, fanning out across discovered repos.
+
+    Repos run concurrently with bounded parallelism
+    (``dreaming_daemon_max_concurrency``) so a slow repo can no longer hold
+    up the whole queue. ``acquire_dreaming_lease`` keeps the cycle safe
+    cross-process and against a still-running prior cycle on the same DB —
+    a stale daemon won't double-write.
+    """
+    repos = discover_dreaming_repos(store)
+    if not repos:
+        return []
     cycle_now = now or datetime.now(UTC)
-    for repo in discover_dreaming_repos(store):
-        runtime = RepoMemoryRuntime(repo=repo, store=store, config=config)
+    concurrency = max(1, getattr(config, "dreaming_daemon_max_concurrency", 1))
+    logger.info(
+        "repo_memory_dreaming_cycle_started repos=%d concurrency=%d chunk_size=%d",
+        len(repos),
+        concurrency,
+        getattr(config, "dreaming_light_phase_chunk_size", 0),
+    )
+    runs: list[DreamRun] = []
+    failures = 0
+
+    def _run_one(repo: str) -> DreamRun | None:
         try:
-            runs.append(
-                run_repo_memory_dreaming_pass(
-                    runtime,
-                    worker_id=f"{worker_prefix}:{repo}",
-                    now=cycle_now,
-                )
+            runtime = RepoMemoryRuntime(repo=repo, store=store, config=config)
+            return run_repo_memory_dreaming_pass(
+                runtime,
+                worker_id=f"{worker_prefix}:{repo}",
+                now=cycle_now,
             )
         except Exception:
             logger.exception("repo_memory_dreaming_cycle_failed repo=%s", repo)
+            _DREAMING_CONSECUTIVE_FAILURES[repo] = _DREAMING_CONSECUTIVE_FAILURES.get(repo, 0) + 1
+            return None
+
+    if concurrency == 1:
+        for repo in repos:
+            outcome = _run_one(repo)
+            if outcome is not None:
+                runs.append(outcome)
+                _DREAMING_CONSECUTIVE_FAILURES.pop(repo, None)
+            else:
+                failures += 1
+    else:
+        with ThreadPoolExecutor(
+            max_workers=concurrency,
+            thread_name_prefix="dreaming-daemon",
+        ) as pool:
+            for repo, outcome in zip(repos, pool.map(_run_one, repos), strict=False):
+                if outcome is not None:
+                    runs.append(outcome)
+                    _DREAMING_CONSECUTIVE_FAILURES.pop(repo, None)
+                else:
+                    failures += 1
+
+    logger.info(
+        "repo_memory_dreaming_cycle_finished repos=%d succeeded=%d failed=%d",
+        len(repos),
+        len(runs),
+        failures,
+    )
     return runs
+
+
+# Per-repo consecutive-failure counter so monitoring can alert on a repo
+# that keeps failing every cycle (vs. one-off transient errors).
+_DREAMING_CONSECUTIVE_FAILURES: dict[str, int] = {}
+
+
+def get_dreaming_failure_counts() -> dict[str, int]:
+    """Snapshot of consecutive-failure counts per repo (for metrics export)."""
+    return dict(_DREAMING_CONSECUTIVE_FAILURES)
 
 
 def run_repo_memory_dreaming_daemon(
@@ -122,9 +180,7 @@ def run_repo_memory_dreaming_daemon(
     cycles: list[list[DreamRun]] = []
     remaining = iterations
     pause = (
-        sleep_seconds
-        if sleep_seconds is not None
-        else config.dreaming_daemon_poll_interval_seconds
+        sleep_seconds if sleep_seconds is not None else config.dreaming_daemon_poll_interval_seconds
     )
     while remaining is None or remaining > 0:
         cycles.append(run_repo_memory_dreaming_cycle(store, config=config))

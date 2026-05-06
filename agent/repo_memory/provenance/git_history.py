@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import shlex
 from collections import Counter
 from dataclasses import dataclass
-import shlex
-from typing import Any
 
 from ..runtime import runtime_attr
 

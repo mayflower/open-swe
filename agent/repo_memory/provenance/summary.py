@@ -14,4 +14,3 @@ def summarize_entity_history(
         "provenance": provenance,
         "deep_history": list(deep_history or []),
     }
-

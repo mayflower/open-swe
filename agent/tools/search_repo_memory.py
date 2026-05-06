@@ -104,3 +104,88 @@ def _claim_to_payload(claim: Any, similarity: float) -> dict[str, Any]:
         "similarity": similarity,
         "explanation": f"vector={similarity:.3f}",
     }
+
+
+async def asearch_repo_memory(
+    query: str,
+    claim_kind: str | None = None,
+    scope_kind: str | None = None,
+    scope_ref: str | None = None,
+    include_events: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Async sibling — awaits ``afind_related_claims`` and
+    ``alist_repo_events`` so the calling agent loop never blocks on the
+    asyncpg pool.
+    """
+    runtime = resolve_runtime_from_context()
+    repo = runtime_attr(runtime, "repo", "unknown")
+    store = runtime_attr(runtime, "store")
+    if store is None:
+        return {"repo": repo, "claims": [], "events": [], "retrieval": "unavailable"}
+
+    config: RepoMemoryConfig = (
+        runtime_attr(runtime, "config", RepoMemoryConfig()) or RepoMemoryConfig()
+    )
+    max_results = limit or config.max_event_search_results
+
+    claim_kind_enum = ClaimKind(claim_kind) if claim_kind else None
+    scope_kind_enum = ClaimScopeKind(scope_kind) if scope_kind else None
+
+    claim_hits: list[dict[str, Any]] = []
+    retrieval = "no_vector_support"
+    if hasattr(store, "afind_related_claims") and hasattr(store, "embedding_provider"):
+        provider = store.embedding_provider
+        query_embedding = provider.embed(query)
+        related = await store.afind_related_claims(
+            repo,
+            query_embedding,
+            claim_kind=claim_kind_enum,
+            scope_kind=scope_kind_enum,
+            scope_ref=scope_ref,
+            limit=max_results,
+        )
+        claim_hits = [_claim_to_payload(claim, similarity) for claim, similarity in related]
+        retrieval = "pgvector" if type(store).__name__ == "PostgresRepoMemoryStore" else "vector"
+    elif hasattr(store, "find_related_claims"):
+        provider = build_embedding_provider(config)
+        query_embedding = provider.embed(query)
+        related = store.find_related_claims(
+            repo,
+            query_embedding,
+            claim_kind=claim_kind_enum,
+            scope_kind=scope_kind_enum,
+            scope_ref=scope_ref,
+            limit=max_results,
+        )
+        claim_hits = [_claim_to_payload(claim, similarity) for claim, similarity in related]
+        retrieval = "in_memory_vector"
+
+    event_hits: list[dict[str, Any]] = []
+    if include_events:
+        if hasattr(store, "alist_repo_events"):
+            events = await store.alist_repo_events(repo)
+        elif hasattr(store, "list_repo_events"):
+            events = store.list_repo_events(repo)
+        else:
+            events = []
+        for hit in search_repo_events(events, query, limit=max_results):
+            event_hits.append(
+                {
+                    "event_id": hit.event.event_id,
+                    "kind": hit.event.kind.value,
+                    "summary": hit.event.summary,
+                    "score": hit.score,
+                    "explanation": f"lexical_only; {hit.explanation}",
+                    "path": hit.event.path,
+                    "entity_id": hit.event.entity_id,
+                    "observed_seq": hit.event.observed_seq,
+                }
+            )
+
+    return {
+        "repo": repo,
+        "claims": claim_hits,
+        "events": event_hits,
+        "retrieval": retrieval,
+    }

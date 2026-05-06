@@ -2,7 +2,6 @@ from pathlib import Path
 
 from agent.repo_memory.parsing.rust_parser import parse_rust_entities
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "rust_sample_module.rs.txt"
 
 

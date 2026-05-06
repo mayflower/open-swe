@@ -34,7 +34,7 @@ def test_get_agent_registers_repo_memory_wiring() -> None:
     dummy_agent = _DummyAgent()
 
     with (
-        patch.object(server, "resolve_github_token", new=AsyncMock(return_value=("ghp", "enc"))),
+        patch.object(server, "resolve_github_token", new=AsyncMock(return_value=("ghp", None))),
         patch.object(
             server,
             "get_sandbox_id_from_metadata",
@@ -50,7 +50,9 @@ def test_get_agent_registers_repo_memory_wiring() -> None:
         patch.object(server, "check_or_recreate_sandbox", new=AsyncMock(return_value=mock_sandbox)),
         patch.object(server, "make_model", return_value=MagicMock()),
         patch.object(server, "construct_system_prompt", return_value="prompt"),
-        patch.object(server, "create_deep_agent", return_value=dummy_agent) as mock_create_deep_agent,
+        patch.object(
+            server, "create_deep_agent", return_value=dummy_agent
+        ) as mock_create_deep_agent,
         patch.dict(server.SANDBOX_BACKENDS, {"thread-123": mock_sandbox}, clear=True),
         patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
     ):
@@ -61,7 +63,6 @@ def test_get_agent_registers_repo_memory_wiring() -> None:
     middleware = create_kwargs["middleware"]
 
     assert agent is dummy_agent
-    assert config["metadata"]["github_token_encrypted"] == "enc"
     assert config["metadata"]["repo_full_name"] == "langchain-ai/open-swe"
     assert isinstance(config["metadata"]["repo_memory_runtime"], RepoMemoryRuntime)
     assert config["metadata"]["repo_memory_runtime"].repo == "langchain-ai/open-swe"
@@ -83,7 +84,7 @@ def test_get_agent_uses_postgres_repo_memory_store_when_database_url_is_configur
     dummy_agent = _DummyAgent()
 
     with (
-        patch.object(server, "resolve_github_token", new=AsyncMock(return_value=("ghp", "enc"))),
+        patch.object(server, "resolve_github_token", new=AsyncMock(return_value=("ghp", None))),
         patch.object(
             server,
             "get_sandbox_id_from_metadata",

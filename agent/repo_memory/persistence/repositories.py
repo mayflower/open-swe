@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -59,6 +60,18 @@ class InMemoryRepoMemoryStore:
         init=False, default_factory=lambda: defaultdict(list)
     )
     _leases: dict[str, DreamingLease] = field(init=False, default_factory=dict)
+    _seq_lock: threading.Lock = field(init=False, default_factory=threading.Lock)
+
+    def allocate_observed_seq(self, repo: str) -> int:
+        """Atomically reserve the next observed_seq.
+
+        Mirrors the postgres method so callers can rely on a single API for
+        racy seq allocation regardless of backend.
+        """
+        with self._seq_lock:
+            state = self._sync_state[repo]
+            state["last_observed_seq"] = state["last_observed_seq"] + 1
+            return state["last_observed_seq"]
 
     def list_repositories(self) -> list[str]:
         repos: set[str] = set(self._events)
@@ -91,6 +104,10 @@ class InMemoryRepoMemoryStore:
     def get_file(self, repo: str, path: str) -> RepoFile | None:
         return self._files.get((repo, path))
 
+    def upsert_entity_revisions(self, revisions: list[EntityRevision]) -> None:
+        for revision in revisions:
+            self.upsert_entity_revision(revision)
+
     def upsert_entity_revision(self, revision: EntityRevision) -> None:
         current = self._entities.get(revision.entity_id)
         if current is None:
@@ -118,6 +135,13 @@ class InMemoryRepoMemoryStore:
             if entity.repo == repo:
                 revisions.append(entity.current_revision)
         return revisions
+
+    def iter_entities_for_path(self, repo: str, path: str) -> list[EntityRevision]:
+        return [
+            entity.current_revision
+            for entity in self._entities.values()
+            if entity.repo == repo and entity.path == path
+        ]
 
     def append_repo_event(self, event: RepoEvent) -> None:
         self._events[event.repo].append(event)
@@ -166,7 +190,9 @@ class InMemoryRepoMemoryStore:
             self._claim_source_index[(claim.repo, claim.source_identity_key)] = claim.claim_key
         return current
 
-    def get_claim_by_source_identity(self, repo: str, source_identity_key: str) -> MemoryClaim | None:
+    def get_claim_by_source_identity(
+        self, repo: str, source_identity_key: str
+    ) -> MemoryClaim | None:
         claim_key = self._claim_source_index.get((repo, source_identity_key))
         if claim_key is None:
             return None
@@ -310,7 +336,9 @@ class InMemoryRepoMemoryStore:
         return list(self._lineage)
 
 
-def create_repo_memory_store(config: RepoMemoryConfig) -> InMemoryRepoMemoryStore | PostgresRepoMemoryStore:
+def create_repo_memory_store(
+    config: RepoMemoryConfig,
+) -> InMemoryRepoMemoryStore | PostgresRepoMemoryStore:
     backend = config.resolved_backend()
     if backend == "postgres":
         if not config.database_url:

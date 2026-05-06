@@ -4,6 +4,7 @@ import asyncpg
 
 from agent.repo_memory.persistence.migrations import (
     latest_repo_memory_schema_version,
+    list_repo_memory_migrations,
     validate_repo_memory_schema,
 )
 from agent.repo_memory.persistence.models import build_metadata
@@ -66,4 +67,5 @@ def test_postgres_schema_validation_uses_latest_migration(
         return [row["version"] for row in rows]
 
     assert version == latest_repo_memory_schema_version()
-    assert asyncio.run(_fetch_applied_versions()) == [version]
+    expected_versions = [migration.version for migration in list_repo_memory_migrations()]
+    assert asyncio.run(_fetch_applied_versions()) == expected_versions

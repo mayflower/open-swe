@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import RepoMemoryConfig
@@ -204,26 +204,32 @@ def run_light_phase(
 ) -> LightPhaseResult:
     """Ingest events into candidate claims with pgvector + Jaccard dedup.
 
-    Light stages reinforcement signals. It does not score or promote.
+    Light stages reinforcement signals. It does not score or promote. Events
+    are processed in ``dreaming_light_phase_chunk_size`` chunks so a large
+    backlog has bounded per-iteration memory + embedding-batch size, and so
+    downstream consumers see partial progress (each ``attach_claim_evidence``
+    is its own commit).
     """
     result = LightPhaseResult()
     result.new_events = len(events)
-    candidates = build_candidate_claims_from_events(repo, events, now=now, config=config)
-    result.candidate_claims = len(candidates)
-
-    for candidate, evidence in candidates:
-        claim, vector_merged, jaccard_merged = _upsert_candidate_with_dedup(
-            store, candidate, evidence, config=config
-        )
-        evidence.claim_key = claim.claim_key
-        evidence.run_id = run_id
-        store.attach_claim_evidence(claim.claim_key, evidence)
-        _record_phase_hit(store, claim, phase="light")
-        result.touched_claim_keys.append(claim.claim_key)
-        if vector_merged:
-            result.merged_claims += 1
-        if jaccard_merged:
-            result.jaccard_merged += 1
+    chunk_size = max(1, config.dreaming_light_phase_chunk_size)
+    for index in range(0, len(events), chunk_size):
+        chunk = events[index : index + chunk_size]
+        candidates = build_candidate_claims_from_events(repo, chunk, now=now, config=config)
+        result.candidate_claims += len(candidates)
+        for candidate, evidence in candidates:
+            claim, vector_merged, jaccard_merged = _upsert_candidate_with_dedup(
+                store, candidate, evidence, config=config
+            )
+            evidence.claim_key = claim.claim_key
+            evidence.run_id = run_id
+            store.attach_claim_evidence(claim.claim_key, evidence)
+            _record_phase_hit(store, claim, phase="light")
+            result.touched_claim_keys.append(claim.claim_key)
+            if vector_merged:
+                result.merged_claims += 1
+            if jaccard_merged:
+                result.jaccard_merged += 1
     return result
 
 
@@ -269,9 +275,7 @@ def run_deep_phase(
     result = DeepPhaseResult()
     claims_before = store.list_claims(repo)
     result.scored_claims = len(claims_before)
-    result.promoted_claims = score_and_transition_claims(
-        store, repo, now=now, config=config
-    )
+    result.promoted_claims = score_and_transition_claims(store, repo, now=now, config=config)
     snapshot = compile_repo_core_snapshot(
         store,
         repo,
@@ -329,9 +333,7 @@ def run_repo_memory_dreaming_pass(
         store.create_dream_run(run)
 
         new_events = [
-            event
-            for event in store.list_repo_events(repo)
-            if event.observed_seq > cursor_before
+            event for event in store.list_repo_events(repo) if event.observed_seq > cursor_before
         ]
 
         light = run_light_phase(
@@ -344,9 +346,7 @@ def run_repo_memory_dreaming_pass(
             config=config,
             touched_claim_keys=light.touched_claim_keys,
         )
-        deep = run_deep_phase(
-            store, repo, source_watermark=watermark, now=run_now, config=config
-        )
+        deep = run_deep_phase(store, repo, source_watermark=watermark, now=run_now, config=config)
 
         run.signal_count = light.new_events
         run.claim_candidate_count = light.candidate_claims
@@ -392,7 +392,9 @@ def run_repo_memory_dreaming_loop(
     config = runtime_attr(runtime, "config", RepoMemoryConfig()) or RepoMemoryConfig()
     runs: list[DreamRun] = []
     target_iterations = iterations if iterations is not None else 1
-    pause = sleep_seconds if sleep_seconds is not None else config.dreaming_daemon_poll_interval_seconds
+    pause = (
+        sleep_seconds if sleep_seconds is not None else config.dreaming_daemon_poll_interval_seconds
+    )
     for index in range(target_iterations):
         runs.append(run_repo_memory_dreaming_pass(runtime, worker_id=worker_id))
         if index + 1 < target_iterations:
@@ -491,6 +493,68 @@ def build_snapshot_injection_blocks(
         blocks = _apply_overlay_to_blocks(blocks, overlay_claims)
     for block in blocks:
         store.set_core_block(repo, block)
+    return blocks
+
+
+async def abuild_snapshot_injection_blocks(
+    store: object,
+    repo: str,
+    *,
+    config: RepoMemoryConfig,
+    focus_paths: list[str] | None = None,
+    focus_entities: list[str] | None = None,
+) -> list[RepoCoreBlock] | None:
+    """Async path used by the injection middleware.
+
+    Falls back to the sync implementation if the store hasn't exposed
+    ``a*`` siblings — keeps the in-memory store path simple.
+    """
+    if not supports_dreaming(store):
+        return None
+    if not all(
+        hasattr(store, name)
+        for name in (
+            "aget_latest_repo_core_snapshot",
+            "alist_claims",
+            "aset_core_block",
+            "alist_repo_events",
+            "afind_related_claims",
+        )
+    ):
+        return build_snapshot_injection_blocks(
+            store,
+            repo,
+            config=config,
+            focus_paths=focus_paths,
+            focus_entities=focus_entities,
+        )
+    snapshot = await store.aget_latest_repo_core_snapshot(repo)
+    if snapshot is None:
+        return None
+    claims_by_key = {claim.claim_key: claim for claim in await store.alist_claims(repo)}
+    blocks = [
+        RepoCoreBlock(
+            label=block.label,
+            description=block.description,
+            value=block.value,
+            token_budget=block.token_budget,
+            read_only=block.read_only,
+        )
+        for block in snapshot.blocks
+    ]
+    overlay_claims = await _abuild_overlay_claims(
+        store,
+        repo,
+        snapshot=snapshot,
+        config=config,
+        focus_paths=focus_paths or [],
+        focus_entities=focus_entities or [],
+        claims_by_key=claims_by_key,
+    )
+    if overlay_claims:
+        blocks = _apply_overlay_to_blocks(blocks, overlay_claims)
+    for block in blocks:
+        await store.aset_core_block(repo, block)
     return blocks
 
 
@@ -687,6 +751,16 @@ def _upsert_candidate_with_dedup(
     *,
     config: RepoMemoryConfig,
 ) -> tuple[MemoryClaim, bool, bool]:
+    # Postgres path: serialize concurrent writers via pg_advisory_xact_lock.
+    # Falls back to the legacy non-transactional flow for in-memory stores
+    # (used in tests and the no-DB dev mode).
+    if hasattr(store, "upsert_candidate_with_dedup"):
+        return store.upsert_candidate_with_dedup(
+            candidate,
+            merge_similarity_threshold=config.dreaming_merge_similarity_threshold,
+            jaccard_threshold=config.dreaming_jaccard_dedup_threshold,
+        )
+
     existing = store.get_claim_by_source_identity(candidate.repo, candidate.source_identity_key)
     if existing is not None:
         updated = _merge_claim(existing, candidate)
@@ -760,11 +834,7 @@ def _has_rem_signal(claim: MemoryClaim, evidence: list[ClaimEvidence]) -> bool:
     distinct_runs = {item.run_id for item in evidence if item.run_id}
     distinct_threads = {item.source_thread_id for item in evidence if item.source_thread_id}
     distinct_paths = {item.source_path for item in evidence if item.source_path}
-    return (
-        len(distinct_runs) >= 2
-        or len(distinct_threads) >= 2
-        or len(distinct_paths) >= 2
-    )
+    return len(distinct_runs) >= 2 or len(distinct_threads) >= 2 or len(distinct_paths) >= 2
 
 
 def _record_phase_hit(store: object, claim: MemoryClaim, *, phase: str) -> None:
@@ -853,14 +923,10 @@ def _evaluate_promotion_gates(
         failures.append(f"score<{config.dreaming_promotion_min_score}")
     evidence_count = len(evidence)
     if evidence_count < config.dreaming_promotion_min_evidence_count:
-        failures.append(
-            f"evidence_count<{config.dreaming_promotion_min_evidence_count}"
-        )
+        failures.append(f"evidence_count<{config.dreaming_promotion_min_evidence_count}")
     source_diversity = _source_diversity(evidence)
     if source_diversity < config.dreaming_promotion_min_source_diversity:
-        failures.append(
-            f"source_diversity<{config.dreaming_promotion_min_source_diversity}"
-        )
+        failures.append(f"source_diversity<{config.dreaming_promotion_min_source_diversity}")
     if not revalidation_passed:
         failures.append("revalidation_failed")
     if float(components["contradiction_penalty"]) > 0:
@@ -1049,6 +1115,54 @@ def _build_overlay_claims(
         if candidate.claim_key in snapshot.source_claim_keys:
             continue
         related = store.find_related_claims(
+            repo,
+            candidate.embedding,
+            claim_kind=candidate.claim_kind,
+            scope_kind=candidate.scope_kind,
+            scope_ref=candidate.scope_ref,
+            limit=1,
+        )
+        if (
+            related
+            and related[0][1] >= config.dreaming_overlay_similarity_threshold
+            and related[0][0].claim_key in snapshot.source_claim_keys
+        ):
+            continue
+        is_focus_relevant = (
+            candidate.metadata.get("path") in focus_paths
+            or candidate.metadata.get("entity_id") in focus_entities
+        )
+        priority = 1.0 if is_focus_relevant else _event_importance_from_claim(candidate)
+        candidate.score = priority
+        overlay.append(candidate)
+    overlay.sort(key=lambda claim: (-claim.score, claim.claim_key))
+    return overlay[: config.dreaming_overlay_max_items]
+
+
+async def _abuild_overlay_claims(
+    store: object,
+    repo: str,
+    *,
+    snapshot: RepoCoreSnapshot,
+    config: RepoMemoryConfig,
+    focus_paths: list[str],
+    focus_entities: list[str],
+    claims_by_key: dict[str, MemoryClaim],
+) -> list[MemoryClaim]:
+    repo_events = await store.alist_repo_events(repo)
+    recent_events = [
+        event for event in repo_events if event.observed_seq > snapshot.source_watermark
+    ]
+    overlay: list[MemoryClaim] = []
+    for candidate, _evidence in build_candidate_claims_from_events(
+        repo,
+        recent_events,
+        now=datetime.now(UTC),
+        config=config,
+    ):
+        if candidate.claim_key in snapshot.source_claim_keys:
+            continue
+        related = await store.afind_related_claims(
             repo,
             candidate.embedding,
             claim_kind=candidate.claim_kind,

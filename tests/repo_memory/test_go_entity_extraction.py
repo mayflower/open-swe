@@ -2,7 +2,6 @@ from pathlib import Path
 
 from agent.repo_memory.parsing.go_parser import parse_go_entities
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "go_sample_module.go.txt"
 
 

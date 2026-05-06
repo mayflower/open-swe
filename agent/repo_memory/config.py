@@ -76,6 +76,11 @@ class RepoMemoryConfig:
     # normalized text overlaps an existing claim above this threshold is
     # treated as a reinforcement rather than a new claim.
     dreaming_jaccard_dedup_threshold: float = 0.9
+    # Light-phase chunking. Process at most ``light_phase_chunk_size`` events
+    # per chunk so a backlog of N events doesn't exceed the lease TTL.
+    dreaming_light_phase_chunk_size: int = 50
+    # Maximum repos processed concurrently per daemon cycle.
+    dreaming_daemon_max_concurrency: int = 4
 
     def __post_init__(self) -> None:
         self.embedding_provider = _resolved_embedding_provider(self.embedding_provider)

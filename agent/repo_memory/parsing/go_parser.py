@@ -52,9 +52,7 @@ def _emit_type_declaration(
         )
 
 
-def _emit_function(
-    node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]
-) -> None:
+def _emit_function(node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]) -> None:
     name_node = node.child_by_field_name("name")
     if name_node is None:
         return
@@ -80,9 +78,7 @@ def _emit_function(
     )
 
 
-def _emit_method(
-    node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]
-) -> None:
+def _emit_method(node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]) -> None:
     name_node = node.child_by_field_name("name")
     receiver_node = node.child_by_field_name("receiver")
     if name_node is None:

@@ -42,9 +42,7 @@ def _walk(
                 _walk(body, source_bytes, path, parent=parent, out=out)
 
 
-def _emit_trait(
-    node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]
-) -> None:
+def _emit_trait(node: ts.Node, source_bytes: bytes, path: str, out: list[ParsedEntity]) -> None:
     name_node = node.child_by_field_name("name")
     if name_node is None:
         return

@@ -37,4 +37,3 @@ def match_entities(old: EntityRevision, new: EntityRevision) -> MatchDecision:
         preserve_identity=preserve_identity,
         reason=", ".join(reasons),
     )
-

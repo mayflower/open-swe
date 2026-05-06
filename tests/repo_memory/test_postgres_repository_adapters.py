@@ -28,7 +28,7 @@ def test_postgres_store_persists_files_entities_events_and_sync_state(
     )
     postgres_store.upsert_entity_revision(
         EntityRevision(
-            entity_id="agent/a.py:helper",
+            entity_id="repo|agent/a.py:helper",
             repo="repo",
             path="agent/a.py",
             language="python",
@@ -47,7 +47,7 @@ def test_postgres_store_persists_files_entities_events_and_sync_state(
             summary="Prefer helper reuse.",
             observed_seq=2,
             path="agent/a.py",
-            entity_id="agent/a.py:helper",
+            entity_id="repo|agent/a.py:helper",
         )
     )
     postgres_store.set_core_block(
@@ -72,7 +72,7 @@ def test_postgres_store_persists_files_entities_events_and_sync_state(
     assert isinstance(reloaded, PostgresRepoMemoryStore)
 
     repo_file = reloaded.get_file("repo", "agent/a.py")
-    entity = reloaded.get_entity("agent/a.py:helper")
+    entity = reloaded.get_entity("repo|agent/a.py:helper")
 
     assert repo_file is not None
     assert repo_file.current_revision.observed_seq == 1

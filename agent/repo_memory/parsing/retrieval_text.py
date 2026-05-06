@@ -17,4 +17,3 @@ def build_retrieval_text(entity: ParsedEntity) -> str:
         parts.append(f"comment={entity.comment.strip()}")
     parts.append(f"body={normalize_body(entity.body)}")
     return "\n".join(part for part in parts if part and not part.endswith("="))
-

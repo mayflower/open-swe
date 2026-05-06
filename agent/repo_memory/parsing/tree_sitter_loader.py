@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 
 import tree_sitter as ts
 import tree_sitter_go as tsg
@@ -17,7 +17,7 @@ _LANGUAGE_FACTORIES = {
 }
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_language(name: str) -> ts.Language:
     factory = _LANGUAGE_FACTORIES.get(name)
     if factory is None:
@@ -25,7 +25,7 @@ def get_language(name: str) -> ts.Language:
     return ts.Language(factory())
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_parser(name: str) -> ts.Parser:
     return ts.Parser(get_language(name))
 

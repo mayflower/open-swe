@@ -44,9 +44,7 @@ def test_end_to_end_repo_memory_flow_uses_automatic_runtime_handoff_and_flush() 
         "agent.repo_memory.middleware.injection.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
-        payload = asyncio.run(
-            inject_repo_memory_before_model.abefore_model(state, object())
-        )
+        payload = asyncio.run(inject_repo_memory_before_model.abefore_model(state, object()))
     results = search_similar_code_results(
         store.iter_entities("repo"),
         "helper reuse duplicate code",
@@ -62,7 +60,7 @@ def test_end_to_end_repo_memory_flow_uses_automatic_runtime_handoff_and_flush() 
     assert "Repository memory" in render_repo_memory_message(store.list_core_blocks("repo"))
     assert results[0].entity.qualified_name == "helper"
     assert store.list_repo_events("repo")[0].kind == RepoEventKind.DECISION
-    assert store.get_entity("agent/feature.py:helper") is not None
+    assert store.get_entity("repo|agent/feature.py:helper") is not None
 
 
 def test_end_to_end_repo_memory_flow_persists_and_retrieves_through_postgres(
@@ -99,9 +97,7 @@ def test_end_to_end_repo_memory_flow_persists_and_retrieves_through_postgres(
         "agent.repo_memory.middleware.injection.get_config",
         return_value={"metadata": {"repo_memory_runtime": runtime}},
     ):
-        payload = asyncio.run(
-            inject_repo_memory_before_model.abefore_model(state, object())
-        )
+        payload = asyncio.run(inject_repo_memory_before_model.abefore_model(state, object()))
 
     reloaded_store = PostgresRepoMemoryStore(
         database_url=postgres_url,
@@ -120,11 +116,13 @@ def test_end_to_end_repo_memory_flow_persists_and_retrieves_through_postgres(
     assert payload is not None
     assert state["repo_memory_runtime"] is runtime
     assert state["dirty_paths"] == set()
-    assert "Repository memory" in render_repo_memory_message(reloaded_store.list_core_blocks("repo"))
+    assert "Repository memory" in render_repo_memory_message(
+        reloaded_store.list_core_blocks("repo")
+    )
     assert results[0].entity.qualified_name == "helper"
     assert "vector=" in results[0].explanation
     assert reloaded_store.list_repo_events("repo")[0].kind == RepoEventKind.DECISION
-    assert reloaded_store.get_entity("agent/feature.py:helper") is not None
+    assert reloaded_store.get_entity("repo|agent/feature.py:helper") is not None
 
 
 class _FakeResult:

@@ -24,12 +24,14 @@ from agent.repo_memory.domain import (
 from agent.repo_memory.dreaming import (
     build_candidate_claims_from_events,
     build_snapshot_injection_blocks,
-    explain_dreaming_promotions,
-    run_light_phase,
     run_repo_memory_dreaming_pass,
     score_and_transition_claims,
     upsert_candidate_claim,
 )
+from agent.repo_memory.middleware.injection import build_injection_payload
+from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
+from agent.repo_memory.persistence.repositories import InMemoryRepoMemoryStore
+from agent.repo_memory.runtime import RepoMemoryRuntime, bind_runtime_context
 
 
 def _permissive_dreaming_config(**overrides) -> RepoMemoryConfig:
@@ -49,10 +51,6 @@ def _permissive_dreaming_config(**overrides) -> RepoMemoryConfig:
     }
     base.update(overrides)
     return RepoMemoryConfig(**base)
-from agent.repo_memory.middleware.injection import build_injection_payload
-from agent.repo_memory.persistence.postgres import PostgresRepoMemoryStore
-from agent.repo_memory.persistence.repositories import InMemoryRepoMemoryStore
-from agent.repo_memory.runtime import RepoMemoryRuntime, bind_runtime_context
 
 
 def test_upsert_candidate_claim_uses_source_identity_over_text() -> None:

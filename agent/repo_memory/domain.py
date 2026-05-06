@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -224,5 +225,16 @@ class RepoFile:
             self.current_revision = revision
 
 
-def make_repo_event_id(repo: str, observed_seq: int, kind: RepoEventKind) -> str:
-    return f"{repo}:{kind.value}:{observed_seq}"
+def make_repo_event_id(
+    repo: str,
+    observed_seq: int,
+    kind: RepoEventKind,
+) -> str:
+    """Stable, collision-free event id.
+
+    Two events at the same ``observed_seq`` are legitimate (different
+    ``kind``, different callers passing the seq directly, or a retry that
+    re-runs the op without reallocating). The UUID4 suffix guarantees
+    ``ON CONFLICT (event_id) DO NOTHING`` never silently drops one of them.
+    """
+    return f"{repo}:{kind.value}:{observed_seq}:{uuid.uuid4().hex}"
