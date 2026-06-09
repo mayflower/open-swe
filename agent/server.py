@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ from .prompt import construct_system_prompt
 from .tools import (
     fetch_url,
     http_request,
+    jira_comment,
+    jira_get_issue,
+    jira_get_issue_comments,
     linear_comment,
     linear_create_issue,
     linear_delete_issue,
@@ -85,6 +89,7 @@ from .utils.model import (
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_github_auth import configure_github_network_access
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracker_context import resolve_tracker_context
 
 client = get_client()
 
@@ -445,6 +450,71 @@ DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
+BASE_TOOLS = [
+    http_request,
+    fetch_url,
+    web_search,
+    request_pr_review,
+    open_pull_request,
+]
+
+LINEAR_TRACKER_TOOLS = [
+    linear_comment,
+    linear_create_issue,
+    linear_delete_issue,
+    linear_get_issue,
+    linear_get_issue_comments,
+    linear_list_teams,
+    linear_update_issue,
+]
+
+JIRA_TRACKER_TOOLS = [
+    jira_comment,
+    jira_get_issue,
+    jira_get_issue_comments,
+]
+
+SLACK_REPLY_TOOLS = [slack_thread_reply, slack_read_thread_messages]
+# Upstream removed github_comment in favor of GH_TOKEN=dummy gh; no
+# GitHub-specific reply tool is needed for github-triggered runs.
+GITHUB_REPLY_TOOLS: list[Any] = []
+
+
+def build_prompt_context(configurable: Mapping[str, Any]) -> dict[str, str]:
+    tracker_context = resolve_tracker_context(configurable)
+    return {
+        "source": tracker_context.source,
+        "reply_tool_name": tracker_context.reply_tool_name,
+        "issue_ref": tracker_context.issue_ref,
+    }
+
+
+def get_tools_for_source(source: str) -> list[Any]:
+    """Return the tool surface for a specific tracker or channel source."""
+    tools = list(BASE_TOOLS)
+
+    if source == "linear":
+        tools.extend(LINEAR_TRACKER_TOOLS)
+    elif source == "jira":
+        tools.extend(JIRA_TRACKER_TOOLS)
+    elif source == "slack":
+        tools.extend(SLACK_REPLY_TOOLS)
+    elif source == "github":
+        tools.extend(GITHUB_REPLY_TOOLS)
+
+    return tools
+
+
+def build_agent_middleware() -> list[Any]:
+    return [
+        SanitizeToolInputsMiddleware(),
+        ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+        notify_step_limit_reached,
+    ]
+
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
@@ -491,9 +561,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     profile = await profile_task if profile_task is not None else None
     del github_token
 
-    linear_issue = config["configurable"].get("linear_issue", {})
-    linear_project_id = linear_issue.get("linear_project_id", "")
-    linear_issue_number = linear_issue.get("linear_issue_number", "")
+    tracker_context = resolve_tracker_context(config["configurable"])
+    prompt_context = build_prompt_context(config["configurable"])
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -614,28 +683,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model=main_model,
         system_prompt=construct_system_prompt(
             working_dir=work_dir,
-            linear_project_id=linear_project_id,
-            linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
+            **prompt_context,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_update_issue,
-            open_pull_request,
-            request_pr_review,
-            slack_read_thread_messages,
-            slack_thread_reply,
-        ],
+        tools=get_tools_for_source(tracker_context.source),
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
         middleware=[

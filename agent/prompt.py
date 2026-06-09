@@ -122,15 +122,12 @@ FILE_MANAGEMENT_SECTION = """---
 - Use the appropriate package manager to install dependencies if needed."""
 
 
-TASK_EXECUTION_SECTION = """---
+TASK_EXECUTION_SECTION_TEMPLATE = """---
 
 ### Task Execution
 
 If you make changes, communicate updates in the source channel:
-- Use `linear_comment` for Linear-triggered tasks.
-- Use `slack_thread_reply` for Slack-triggered tasks.
-- For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment` only after confirming the target issue or pull request.
-- If the task was not triggered from a known source (no Slack thread, no Linear ticket, no GitHub issue), skip the notification step.
+- This run is `{source}`-triggered. Use `{reply_tool_name}` for updates and final responses.
 
 If a Slack- or GitHub-triggered request is asking you to review a GitHub pull request, do not clone the repo, edit files, commit, push, or open a PR. Call `request_pr_review` once with the GitHub PR URL, then reply in the source channel to say whether the review was started or why it could not be started, and stop.
 
@@ -142,20 +139,29 @@ For tasks that require code changes, follow this order:
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task. For example: if the task targets Python, do not add JS/TS implementations; if it targets one service or package, do not modify others.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Commit and push your branch. To OPEN a new draft pull request, call the `open_pull_request` tool (NOT `gh pr create`) so the PR is attributed to the triggering user. To UPDATE an existing PR (body, mark ready, etc.), use `GH_TOKEN=dummy gh pr edit`. Do this when the user asks for a PR, when a PR is necessary to deliver or review the changes, or when the Always Create PRs dashboard setting is enabled.
-5. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, comment with `GH_TOKEN=dummy gh`.
+5. **Comment** — Call `{reply_tool_name}` with a summary and the PR link.
 
 **Strict requirement:** Never claim "PR updated/opened" unless the operation returned success and you have the PR URL — from `open_pull_request`'s returned `url`, from `gh` command output, or from `GH_TOKEN=dummy gh pr view --json url --jq .url`. If push or PR creation fails, state that explicitly.
 
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`. Never leave a question unanswered.
+2. **Comment** — Call `{reply_tool_name}` with your answer. Never leave a question unanswered.
 3. **Do not submit changes** — Do not commit, push, or open/update a PR unless the user then asks for changes."""
 
 
-TOOL_USAGE_SECTION = """---
+TOOL_USAGE_SECTION_TEMPLATE = """---
 
 ### Tool Usage
+
+For this run, prefer `{reply_tool_name}` when you need to communicate back through the originating tracker or channel.
+
+#### `list_repos`
+Lists GitHub repositories for a given organization or user via the GitHub API. Pass `organization_name` to specify which org or user to query. Set `is_organization=False` for personal user accounts (defaults to True). Call this first to find the right repo for your task.
+
+#### `get_branch_name`
+Returns the git branch name for this thread. Always call this tool to get the correct branch before making any changes.
+
 
 #### `execute`
 Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running commands (default: 300s).
@@ -169,6 +175,9 @@ Do not use this tool for GitHub API calls. Use `GH_TOKEN=dummy gh` in the sandbo
 
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this after opening/updating the pull request to notify stakeholders and include the PR link. You can tag Linear users with `@username` (their Linear display name).
+
+#### `jira_comment`
+Posts a comment to a Jira issue. Use this when the task was triggered from Jira so status updates and completion notes go back to the Jira ticket.
 
 #### `slack_thread_reply`
 Posts a message to the active Slack thread. Use this for clarifying questions, mid-run progress updates, and final summaries when the task was triggered from Slack. You can call it multiple times during a run — if you're about to do something long-running (cloning a large repo, big refactors, running heavy test suites), post a short status update first so the user knows what's happening. Always end the run with a final reply that summarizes what you did or answers the question. Do not post a status reply before quick, single-tool answers — only when the user would otherwise be left waiting.
@@ -281,7 +290,7 @@ When reviewing code changes:
 9. **Prefer pre-made scripts** for testing, formatting, linting, etc. If unsure whether a script exists, search for it first."""
 
 
-COMMIT_PR_SECTION = """---
+COMMIT_PR_SECTION_TEMPLATE = """---
 
 ### Committing Changes and Opening Pull Requests
 
@@ -312,7 +321,7 @@ When you have completed your implementation, follow these steps in order:
 
    **PR Title** (under 70 characters):
    ```
-   <type>: <concise description> [closes {linear_project_id}-{linear_issue_number}]
+   <type>: <concise description> [closes {issue_ref}]
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
 
@@ -346,9 +355,8 @@ When you have completed your implementation, follow these steps in order:
 **IMPORTANT: If `git push` or `gh` returns "403", "Permission denied", or another permanent authorization failure, do not retry. Report the error to the user immediately and stop.**
 
 4. **Notify the source** immediately after pushing and, when applicable, PR creation/update succeeds. Include a brief summary plus the PR link or branch URL:
-   - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
-   - Slack-triggered: use `slack_thread_reply`
-   - GitHub-triggered: use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`
+   - Use `{reply_tool_name}` for this run's source channel (`{source}`)
+   - For Slack-triggered runs, keep using Slack mrkdwn formatting when you call `slack_thread_reply`
    - If the task was not triggered from a known source channel (no Slack thread, no Linear ticket, no GitHub issue context), skip the notification step.
 
    Example:
@@ -360,7 +368,7 @@ When you have completed your implementation, follow these steps in order:
    - <change 2>
    ```
 
-For code-change tasks, push the branch and notify the appropriate source once implementation is complete and code quality checks pass. Include the PR link when you opened or updated a PR; otherwise include the branch URL."""
+For code-change tasks, push the branch and notify the appropriate source (`{source}` via `{reply_tool_name}`) once implementation is complete and code quality checks pass. Include the PR link when you opened or updated a PR; otherwise include the branch URL."""
 
 
 COLLABORATION_TEMPLATE = """---
@@ -401,36 +409,30 @@ ALWAYS_CREATE_PR_SECTION = """---
 The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
-SYSTEM_PROMPT_TEMPLATE = (
-    WORKING_ENV_SECTION
-    + TASK_OVERVIEW_SECTION
-    + SELF_AWARENESS_SECTION
-    + "{default_prompt_section}"
-    + REPO_SETUP_SECTION
-    + FILE_MANAGEMENT_SECTION
-    + TASK_EXECUTION_SECTION
-    + TOOL_USAGE_SECTION
-    + TOOL_BEST_PRACTICES_SECTION
-    + CODING_STANDARDS_SECTION
-    + CORE_BEHAVIOR_SECTION
-    + DEPENDENCY_SECTION
-    + CODE_REVIEW_GUIDELINES_SECTION
-    + COMMUNICATION_SECTION
-    + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
-    + COMMIT_PR_SECTION
-    + "{pr_policy_override_section}"
-    + "{collaboration_section}"
-)
+def _normalize_source(source: str) -> str:
+    return source or "tracker"
+
+
+def _normalize_reply_tool_name(reply_tool_name: str) -> str:
+    return reply_tool_name or "<REPLY_TOOL_NAME>"
+
+
+def _normalize_issue_ref(issue_ref: str) -> str:
+    return issue_ref or "<ISSUE_REF>"
 
 
 def construct_system_prompt(
     working_dir: str,
-    linear_project_id: str = "",
-    linear_issue_number: str = "",
+    source: str = "",
+    reply_tool_name: str = "",
+    issue_ref: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
 ) -> str:
+    normalized_source = _normalize_source(source)
+    normalized_reply_tool_name = _normalize_reply_tool_name(reply_tool_name)
+    normalized_issue_ref = _normalize_issue_ref(issue_ref)
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
         repo_line = (
@@ -446,13 +448,35 @@ def construct_system_prompt(
     else:
         commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = (
+        WORKING_ENV_SECTION
+        + TASK_OVERVIEW_SECTION
+        + SELF_AWARENESS_SECTION
+        + default_prompt_section
+        + REPO_SETUP_SECTION
+        + FILE_MANAGEMENT_SECTION
+        + TASK_EXECUTION_SECTION_TEMPLATE.format(
+            source=normalized_source,
+            reply_tool_name=normalized_reply_tool_name,
+        )
+        + TOOL_USAGE_SECTION_TEMPLATE.format(reply_tool_name=normalized_reply_tool_name)
+        + TOOL_BEST_PRACTICES_SECTION
+        + CODING_STANDARDS_SECTION
+        + CORE_BEHAVIOR_SECTION
+        + DEPENDENCY_SECTION
+        + CODE_REVIEW_GUIDELINES_SECTION
+        + COMMUNICATION_SECTION
+        + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
+        + COMMIT_PR_SECTION_TEMPLATE.format(
+            issue_ref=normalized_issue_ref,
+            reply_tool_name=normalized_reply_tool_name,
+            source=normalized_source,
+        )
+        + (ALWAYS_CREATE_PR_SECTION if create_prs else "")
+        + _render_collaboration_section(triggering_user_identity)
+    )
+    return prompt.format(
         working_dir=working_dir,
-        linear_project_id=linear_project_id or "<PROJECT_ID>",
-        linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        default_prompt_section=default_prompt_section,
-        pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
-        collaboration_section=_render_collaboration_section(triggering_user_identity),
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )
