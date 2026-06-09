@@ -176,7 +176,7 @@ class TestConfigureGithubProxy:
             mock_sleep.assert_not_called()
 
 
-class TestCreateSandboxWithProxy:
+class TestCreateSandboxWithGithubAccess:
     """Tests for _create_sandbox_with_proxy token source selection."""
 
     @pytest.mark.asyncio
@@ -206,7 +206,7 @@ class TestCreateSandboxWithProxy:
         """Non-langsmith sandboxes should skip proxy configuration."""
         with (
             patch("agent.server.create_sandbox") as mock_create,
-            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch("agent.server.configure_github_network_access") as mock_configure,
             patch.dict("os.environ", {"SANDBOX_TYPE": "daytona"}),
         ):
             mock_create.return_value = MagicMock(id="sandbox-456")
@@ -216,7 +216,7 @@ class TestCreateSandboxWithProxy:
             await _create_sandbox_with_proxy()
 
             mock_create.assert_called_once_with()
-            mock_proxy.assert_not_called()
+            mock_configure.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_raises_when_no_installation_token_for_langsmith(self) -> None:
@@ -311,6 +311,7 @@ class TestRefreshProxyOnSandboxReuse:
         """Reconnected sandboxes should also get a fresh proxy token."""
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-existing")
+        mock_sandbox.execute.return_value = MagicMock(exit_code=0)
 
         with (
             patch(
