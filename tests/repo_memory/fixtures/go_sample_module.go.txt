@@ -1,0 +1,11 @@
+package widgets
+
+type WidgetService struct {}
+
+func (w *WidgetService) Render(name string) string {
+    return "widget:" + name
+}
+
+func Helper(value string) string {
+    return value
+}

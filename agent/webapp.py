@@ -37,6 +37,8 @@ from .dashboard.user_mappings import (
 from .dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,
 )
+from .repo_memory.persistence import notifier as repo_memory_notifier
+from .repo_memory.persistence import pool as repo_memory_pool
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -128,6 +130,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             usage_cache_task.cancel()
             with suppress(asyncio.CancelledError):
                 await usage_cache_task
+        # Pool/listener shutdown ensures asyncpg connections and the
+        # LISTEN/NOTIFY supervisor are torn down cleanly when uvicorn exits.
+        try:
+            repo_memory_notifier.shutdown()
+        except Exception:
+            logger.exception("repo_memory_notifier_shutdown_failed")
+        try:
+            repo_memory_pool.close_all_pools()
+        except Exception:
+            logger.exception("repo_memory_pool_shutdown_failed")
 
 
 app = FastAPI(lifespan=lifespan)

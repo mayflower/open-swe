@@ -1,0 +1,9 @@
+pub trait Renderer {
+    pub fn render(name: &str);
+}
+
+pub struct WidgetService;
+
+pub fn helper(value: &str) -> &str {
+    value
+}

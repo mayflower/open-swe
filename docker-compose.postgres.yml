@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: open-swe-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: open_swe
+      POSTGRES_USER: open_swe
+      POSTGRES_PASSWORD: open_swe
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U open_swe -d open_swe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  repo-memory-dreaming:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-swe-repo-memory-dreaming
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      REPO_MEMORY_BACKEND: postgres
+      REPO_MEMORY_DATABASE_URL: postgresql://open_swe:open_swe@postgres:5432/open_swe
+      REPO_MEMORY_EMBEDDING_PROVIDER: openai
+      REPO_MEMORY_EMBEDDING_MODEL: text-embedding-3-small
+      PYTHONPATH: /workspace
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    command:
+      - /bin/bash
+      - -lc
+      - uv sync --frozen --no-dev && uv run repo-memory-migrate && uv run repo-memory-dreaming-daemon
+
+volumes:
+  postgres_data:

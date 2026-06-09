@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev
+.PHONY: all format format-check lint test tests integration_tests help run dev postgres-up postgres-down postgres-logs postgres-ps repo-memory-migrate repo-memory-probe dreaming-up dreaming-logs dreaming-ps dreaming-reembed
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -15,6 +15,44 @@ run:
 
 install:
 	uv pip install -e .
+
+postgres-up:
+	docker compose -f docker-compose.postgres.yml up -d postgres
+
+postgres-down:
+	docker compose -f docker-compose.postgres.yml down
+
+postgres-logs:
+	docker compose -f docker-compose.postgres.yml logs -f postgres
+
+postgres-ps:
+	docker compose -f docker-compose.postgres.yml ps
+
+repo-memory-migrate:
+	uv run repo-memory-migrate
+
+# End-to-end probe: indexes a repo through Tree-sitter → pgvector, seeds repo
+# events, runs Dreaming twice, prints claims/snapshot/search/explain as JSON.
+#   make repo-memory-probe                      # index current repo, reuse data
+#   make repo-memory-probe PROBE_ARGS="--reset" # clean-slate run
+#   make repo-memory-probe PROBE_PATH=/repo REPO=owner/name
+PROBE_PATH ?= .
+REPO ?= probe/local
+PROBE_ARGS ?=
+repo-memory-probe:
+	uv run repo-memory-probe --path $(PROBE_PATH) --repo $(REPO) $(PROBE_ARGS)
+
+dreaming-up:
+	docker compose -f docker-compose.postgres.yml up -d postgres repo-memory-dreaming
+
+dreaming-logs:
+	docker compose -f docker-compose.postgres.yml logs -f repo-memory-dreaming
+
+dreaming-ps:
+	docker compose -f docker-compose.postgres.yml ps postgres repo-memory-dreaming
+
+dreaming-reembed:
+	docker compose -f docker-compose.postgres.yml run --rm repo-memory-dreaming /bin/bash -lc "uv sync --frozen --no-dev && uv run repo-memory-migrate && uv run repo-memory-dreaming-daemon --reembed-all"
 
 ######################
 # TESTING
@@ -62,6 +100,16 @@ help:
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
 	@echo 'install                      - install dependencies'
+	@echo 'postgres-up                  - start local Postgres + pgvector'
+	@echo 'postgres-down                - stop local Postgres + pgvector'
+	@echo 'postgres-logs                - follow local Postgres logs'
+	@echo 'postgres-ps                  - show local Postgres status'
+	@echo 'repo-memory-migrate          - apply repo-memory Postgres migrations'
+	@echo 'repo-memory-probe            - index a repo + run Dreaming against local Postgres; prints JSON report'
+	@echo 'dreaming-up                  - start local Postgres + Dreaming daemon'
+	@echo 'dreaming-logs                - follow Dreaming daemon logs'
+	@echo 'dreaming-ps                  - show Dreaming daemon + Postgres status'
+	@echo 'dreaming-reembed             - run one full embedding backfill for all repos'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

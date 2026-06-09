@@ -144,6 +144,41 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 - **[Installation Guide](INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Jira/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
+- **[Repository Memory](agent/repo_memory/README.md)** — install, usage, configuration, and testing notes for the repo-memory layer in this fork
+
+## Local Postgres
+
+This fork includes a local Docker Compose setup for Postgres with `pgvector` enabled:
+
+```bash
+make postgres-up
+make repo-memory-migrate
+```
+
+To run the standalone repo-memory Dreaming daemon in Docker against that same database:
+
+```bash
+make dreaming-up
+```
+
+Default connection string:
+
+```bash
+postgresql://open_swe:open_swe@localhost:5432/open_swe
+```
+
+Useful commands:
+
+```bash
+make repo-memory-migrate
+make postgres-ps
+make postgres-logs
+make postgres-down
+make dreaming-ps
+make dreaming-logs
+```
+
+The compose file is [docker-compose.postgres.yml](/Users/johann/src/ml/open-swe/docker-compose.postgres.yml), and the extension is enabled during init by [01-enable-pgvector.sql](/Users/johann/src/ml/open-swe/docker/postgres/initdb/01-enable-pgvector.sql).
 
 ## License
 

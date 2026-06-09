@@ -43,6 +43,7 @@ from .dashboard.team_settings import get_team_default_model_pair, get_team_defau
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
+    RepoMemoryToolMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -50,11 +51,14 @@ from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    inject_repo_memory_before_model,
     notify_step_limit_reached,
 )
 from .prompt import construct_system_prompt
+from .repo_memory.runtime import bind_runtime_context, get_or_create_repo_memory_runtime
 from .tools import (
     fetch_url,
+    get_entity_history,
     http_request,
     jira_comment,
     jira_get_issue,
@@ -67,7 +71,10 @@ from .tools import (
     linear_list_teams,
     linear_update_issue,
     open_pull_request,
+    remember_repo_decision,
     request_pr_review,
+    search_repo_memory,
+    search_similar_code,
     slack_read_thread_messages,
     slack_thread_reply,
     web_search,
@@ -456,6 +463,10 @@ BASE_TOOLS = [
     web_search,
     request_pr_review,
     open_pull_request,
+    remember_repo_decision,
+    search_similar_code,
+    search_repo_memory,
+    get_entity_history,
 ]
 
 LINEAR_TRACKER_TOOLS = [
@@ -535,6 +546,7 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
+    config.setdefault("metadata", {})
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -564,7 +576,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     tracker_context = resolve_tracker_context(config["configurable"])
     prompt_context = build_prompt_context(config["configurable"])
 
+    repo_config = config["metadata"].get("repo", {})
+    repo_full_name = "unknown"
+    if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
+        repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
+    repo_memory_runtime = get_or_create_repo_memory_runtime(repo_full_name)
+    config["metadata"]["repo_full_name"] = repo_full_name
+    config["metadata"]["repo_memory_runtime"] = repo_memory_runtime
+
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    bind_runtime_context(
+        repo_memory_runtime,
+        sandbox_backend=sandbox_backend,
+        work_dir=work_dir,
+    )
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
@@ -695,8 +720,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            RepoMemoryToolMiddleware(),
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            inject_repo_memory_before_model,
             ensure_no_empty_msg,
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),

@@ -1,3 +1,4 @@
+from ..repo_memory.middleware import RepoMemoryToolMiddleware, inject_repo_memory_before_model
 from .check_message_queue import check_message_queue_before_model
 from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
@@ -12,6 +13,7 @@ from .tool_error_handler import ToolErrorMiddleware
 __all__ = [
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
+    "RepoMemoryToolMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "ToolErrorMiddleware",
@@ -19,5 +21,6 @@ __all__ = [
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
+    "inject_repo_memory_before_model",
     "notify_step_limit_reached",
 ]
